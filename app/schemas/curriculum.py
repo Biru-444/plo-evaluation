@@ -23,3 +23,11 @@ class CurriculumCreateSchema(BaseModel):
     name: str
     year: int
     is_active: bool = True
+
+
+class CurriculumUpdateSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = None
+    year: int | None = None
+    is_active: bool | None = None

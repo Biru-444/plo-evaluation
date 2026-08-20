@@ -25,3 +25,13 @@ class CourseCreateSchema(BaseModel):
     name_en: str | None = None
     credit: int
     category: str | None = None
+
+
+class CourseUpdateSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    course_code: str | None = None
+    name_th: str | None = None
+    name_en: str | None = None
+    credit: int | None = None
+    category: str | None = None

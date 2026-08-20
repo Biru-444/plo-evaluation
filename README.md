@@ -1,6 +1,10 @@
 # PLO Evaluation System - Backend
 
-FastAPI backend สำหรับระบบประเมินผลลัพธ์การเรียนรู้ (Program Learning Outcomes)
+FastAPI backend สำหรับระบบประเมินผลลัพธ์การเรียนรู้ระดับหลักสูตร (Program Learning Outcomes)
+ตามแนวทาง Outcome-Based Education (OBE) รองรับการจัดการหลักสูตร, PLO/YLO, รายวิชา, CLO,
+การเปิดสอน, นักศึกษา, คะแนน และคำนวณผลบรรลุ PLO ทั้งรายบุคคลและภาพรวมทั้งรุ่น (รวมถึงแยกตามชั้นปี)
+
+ส่วน frontend (React) อยู่ที่ repo แยก: [plo-frontend](https://github.com/thadchai-glitch/plo-frontend)
 
 ## 🚀 เริ่มต้น
 
@@ -61,5 +65,4 @@ PLO/
 
 ## 📝 Database Schema
 16 tables: User, Curriculum, PLO, YLO, Course, CLO, Student, Enrollment, Assessment Item, etc.
-
-See `plo_evaluation_system_schema_postgresql.sql` for full schema.
+สร้างอัตโนมัติจาก SQLAlchemy models (`app/models/`) ตอนรันแอปครั้งแรก ไม่ต้องรัน migration เอง

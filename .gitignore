@@ -51,3 +51,13 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Contains real students' full names - personal data, not for public repo
+scripts/update_student_names.py
+scripts/backfill_student_titles.py
+
+# Stray file from an earlier accidental shell redirect on Windows
+nul
+
+# Separate repo (thadchai-glitch/plo-frontend), not part of this backend repo
+plo-frontend/

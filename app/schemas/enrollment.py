@@ -19,3 +19,9 @@ class EnrollmentCreateSchema(BaseModel):
     student_id: str
     offering_id: int
     final_grade: str | None = None
+
+
+class EnrollmentUpdateSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    final_grade: str | None = None

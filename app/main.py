@@ -5,7 +5,25 @@ PLO Evaluation System - Backend
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
-from app.routes import assessment, courses, curriculum, enrollment, plo_calculation, students
+from app.routes import (
+    assessment,
+    auth,
+    clo,
+    clo_plo_mapping,
+    course_offering,
+    course_plo,
+    courses,
+    curriculum,
+    enrollment,
+    item_clo,
+    plo,
+    plo_calculation,
+    study_plan,
+    students,
+    users,
+    ylo,
+    ylo_plo_mapping,
+)
 
 # Create tables in database
 Base.metadata.create_all(bind=engine)
@@ -44,12 +62,26 @@ def health_check():
     return {"status": "healthy"}
 
 
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(curriculum.router)
+# plo_calculation.router's literal /plo/achievement(/cohort) paths must be
+# registered before plo.router's /plo/{plo_id} - Starlette matches routes in
+# registration order, and the dynamic segment would otherwise shadow them.
+app.include_router(plo_calculation.router)
+app.include_router(plo.router)
+app.include_router(ylo.router)
+app.include_router(ylo_plo_mapping.router)
 app.include_router(courses.router)
+app.include_router(course_plo.router)
+app.include_router(study_plan.router)
+app.include_router(course_offering.router)
 app.include_router(students.router)
 app.include_router(enrollment.router)
+app.include_router(clo.router)
+app.include_router(clo_plo_mapping.router)
 app.include_router(assessment.router)
-app.include_router(plo_calculation.router)
+app.include_router(item_clo.router)
 
 
 if __name__ == "__main__":

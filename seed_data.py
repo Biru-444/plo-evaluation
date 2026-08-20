@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth import hash_password
 from app.database import SessionLocal
 from app.models import (
     AssessmentItem,
@@ -45,6 +46,10 @@ USER_DATA = [
     ("ajarn.suda", "สุดา", "แสงทอง", "suda@university.ac.th"),
     ("ajarn.wichai", "วิชัย", "รุ่งเรือง", "wichai@university.ac.th"),
 ]
+INSTRUCTOR_PASSWORD = "devpassword123"
+
+ADMIN_USER_DATA = ("admin", "Admin", "User", "admin@university.ac.th")
+ADMIN_PASSWORD = "admin123"
 
 PLO_DATA = [
     ("PLO1", "มีความรู้และความเข้าใจในหลักการพื้นฐานทางวิทยาการคอมพิวเตอร์",
@@ -134,6 +139,18 @@ ASSESSMENT_ITEM_DATA = [
     ("Final Exam", "final", Decimal("60.00")),
 ]
 
+# Second curriculum: courses only, for exercising the Curriculum/Courses page's
+# curriculum switcher. No PLOs, students, or scores attached.
+CURRICULUM2_NAME = "หลักสูตรวิทยาการคอมพิวเตอร์ (ปรับปรุง 2565)"
+CURRICULUM2_YEAR = 2565
+
+COURSE_DATA_2 = [
+    ("cs501", "การเรียนรู้ของเครื่องเบื้องต้น", "Introduction to Machine Learning", 3, "Major Elective"),
+    ("cs502", "ความมั่นคงปลอดภัยไซเบอร์", "Cybersecurity Fundamentals", 3, "Major Elective"),
+    ("cs503", "การประมวลผลบนคลาวด์", "Cloud Computing", 3, "Major Elective"),
+    ("cs504", "วิทยาการข้อมูลเบื้องต้น", "Introduction to Data Science", 3, "Core"),
+]
+
 
 def clear_db(db: Session) -> None:
     db.execute(text(f"TRUNCATE TABLE {', '.join(ALL_TABLES)} RESTART IDENTITY CASCADE"))
@@ -143,13 +160,18 @@ def clear_db(db: Session) -> None:
 
 def seed_users(db: Session) -> list[User]:
     users = [
-        User(username=username, password="devpassword123", first_name=first,
+        User(username=username, password=hash_password(INSTRUCTOR_PASSWORD), first_name=first,
              last_name=last, email=email, role="instructor")
         for username, first, last, email in USER_DATA
     ]
+    admin_username, admin_first, admin_last, admin_email = ADMIN_USER_DATA
+    admin = User(username=admin_username, password=hash_password(ADMIN_PASSWORD),
+                 first_name=admin_first, last_name=admin_last, email=admin_email, role="admin")
+
     db.add_all(users)
+    db.add(admin)
     db.commit()
-    print(f"seeded {len(users)} users")
+    print(f"seeded {len(users)} instructor users + 1 admin user")
     return users
 
 
@@ -336,6 +358,22 @@ def seed_student_scores(db: Session, enrollments: list[Enrollment], items: list[
     return scores
 
 
+def seed_second_curriculum(db: Session) -> Curriculum:
+    curriculum = Curriculum(name=CURRICULUM2_NAME, year=CURRICULUM2_YEAR, is_active=True)
+    db.add(curriculum)
+    db.commit()
+
+    courses = [
+        Course(curriculum_id=curriculum.id, course_code=code, name_th=th, name_en=en,
+               credit=credit, category=category)
+        for code, th, en, credit, category in COURSE_DATA_2
+    ]
+    db.add_all(courses)
+    db.commit()
+    print(f"seeded second curriculum '{curriculum.name}' with {len(courses)} courses")
+    return curriculum
+
+
 def main() -> None:
     db = SessionLocal()
     try:
@@ -352,6 +390,7 @@ def main() -> None:
         clos = seed_clos(db, courses, users, course_plos)
         items = seed_assessment_items(db, offerings, clos)
         seed_student_scores(db, enrollments, items)
+        seed_second_curriculum(db)
         print("\nSeeding complete.")
     except Exception:
         db.rollback()
