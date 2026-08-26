@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_role
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import AssessmentItem, StudentScore, User
+from app.models import AssessmentItem, CourseOffering, StudentScore, User
 from app.schemas import (
     AssessmentCreateSchema,
     AssessmentItemSchema,
@@ -44,8 +44,13 @@ def get_assessment_item(
 def create_assessment_item(
     payload: AssessmentCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(get_current_user),
 ):
+    if current_user.role != "admin":
+        offering = db.get(CourseOffering, payload.offering_id)
+        if offering is None or offering.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
+
     item = AssessmentItem(**payload.model_dump())
     db.add(item)
     try:
@@ -65,11 +70,15 @@ def update_assessment_item(
     item_id: int,
     payload: AssessmentItemUpdateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(get_current_user),
 ):
     item = db.get(AssessmentItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Assessment item not found")
+    if current_user.role != "admin":
+        offering = db.get(CourseOffering, item.offering_id)
+        if offering is None or offering.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
     try:
@@ -87,28 +96,35 @@ def update_assessment_item(
 def delete_assessment_item(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(get_current_user),
 ):
     item = db.get(AssessmentItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Assessment item not found")
+    if current_user.role != "admin":
+        offering = db.get(CourseOffering, item.offering_id)
+        if offering is None or offering.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     db.delete(item)  # cascade ลบ item_clo / student_score ที่อ้างถึงด้วย
     db.commit()
 
 
 @router.get("/student-scores", response_model=list[StudentScoreDetailSchema])
 def list_student_scores(
-    student_id: str = Query(..., description="Student ID, e.g. 6500001"),
+    student_id: str | None = Query(None, description="Student ID, e.g. 6500001"),
+    offering_id: int | None = Query(None, description="คืนคะแนนของนักศึกษาทุกคนในวิชานี้"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    scores = (
-        db.query(StudentScore)
-        .join(AssessmentItem, StudentScore.item_id == AssessmentItem.id)
-        .filter(StudentScore.student_id == student_id)
-        .order_by(StudentScore.id)
-        .all()
-    )
+    if student_id is None and offering_id is None:
+        raise HTTPException(status_code=400, detail="Provide student_id or offering_id")
+
+    query = db.query(StudentScore).join(AssessmentItem, StudentScore.item_id == AssessmentItem.id)
+    if student_id is not None:
+        query = query.filter(StudentScore.student_id == student_id)
+    if offering_id is not None:
+        query = query.filter(AssessmentItem.offering_id == offering_id)
+    scores = query.order_by(StudentScore.id).all()
     return [
         StudentScoreDetailSchema(
             id=score.id,

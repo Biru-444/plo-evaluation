@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_role
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import CLO, User
+from app.models import CLO, CourseOffering, User
 from app.schemas import CLOCreateSchema, CLOSchema, CLOUpdateSchema
 
 router = APIRouter(prefix="/clo", tags=["CLO"])
@@ -41,8 +41,20 @@ def get_clo(
 def create_clo(
     payload: CLOCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(get_current_user),
 ):
+    if current_user.role != "admin":
+        owns_course = (
+            db.query(CourseOffering)
+            .filter(
+                CourseOffering.course_id == payload.course_id,
+                CourseOffering.instructor_id == current_user.id,
+            )
+            .first()
+        )
+        if owns_course is None:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
+
     clo = CLO(**payload.model_dump(), created_by=current_user.id)
     db.add(clo)
     try:
@@ -62,11 +74,22 @@ def update_clo(
     clo_id: int,
     payload: CLOUpdateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(get_current_user),
 ):
     clo = db.get(CLO, clo_id)
     if clo is None:
         raise HTTPException(status_code=404, detail="CLO not found")
+    if current_user.role != "admin":
+        owns_course = (
+            db.query(CourseOffering)
+            .filter(
+                CourseOffering.course_id == clo.course_id,
+                CourseOffering.instructor_id == current_user.id,
+            )
+            .first()
+        )
+        if owns_course is None:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(clo, field, value)
     try:
@@ -82,10 +105,21 @@ def update_clo(
 def delete_clo(
     clo_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(get_current_user),
 ):
     clo = db.get(CLO, clo_id)
     if clo is None:
         raise HTTPException(status_code=404, detail="CLO not found")
+    if current_user.role != "admin":
+        owns_course = (
+            db.query(CourseOffering)
+            .filter(
+                CourseOffering.course_id == clo.course_id,
+                CourseOffering.instructor_id == current_user.id,
+            )
+            .first()
+        )
+        if owns_course is None:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     db.delete(clo)  # cascade ลบ clo_plo_mapping / item_clo ที่อ้างถึงด้วย
     db.commit()
