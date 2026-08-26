@@ -22,10 +22,14 @@ router = APIRouter(tags=["Assessment"])
 
 @router.get("/assessment-items", response_model=list[AssessmentItemSchema])
 def list_assessment_items(
+    offering_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(AssessmentItem).order_by(AssessmentItem.id).all()
+    query = db.query(AssessmentItem)
+    if offering_id is not None:
+        query = query.filter(AssessmentItem.offering_id == offering_id)
+    return query.order_by(AssessmentItem.id).all()
 
 
 @router.get("/assessment-items/{item_id}", response_model=AssessmentItemSchema)

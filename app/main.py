@@ -9,6 +9,7 @@ from app.routes import (
     assessment,
     auth,
     clo,
+    clo_calculation,
     clo_plo_mapping,
     course_offering,
     course_plo,
@@ -69,6 +70,7 @@ app.include_router(curriculum.router)
 # registered before plo.router's /plo/{plo_id} - Starlette matches routes in
 # registration order, and the dynamic segment would otherwise shadow them.
 app.include_router(plo_calculation.router)
+app.include_router(clo_calculation.router)
 app.include_router(plo.router)
 app.include_router(ylo.router)
 app.include_router(ylo_plo_mapping.router)
