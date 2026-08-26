@@ -20,6 +20,7 @@ class UserPublicSchema(BaseModel):
     username: str
     first_name: str
     last_name: str
+    email: str | None
     role: str
 
 
