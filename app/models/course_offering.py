@@ -17,8 +17,10 @@ class CourseOffering(Base):
     course_id: Mapped[int] = mapped_column(
         ForeignKey("course.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False
     )
-    instructor_id: Mapped[int] = mapped_column(
-        ForeignKey("user.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=False
+    # nullable=True: วิชาที่เปิดสอนแต่ยังไม่มีผู้สอน (เช่น เพิ่งเปิดวิชาใหม่ หรือแอดมินปล่อยว่างไว้ตั้งใจ)
+    # จะรอให้อาจารย์มา "จับจอง" เองได้ผ่าน /course-offerings/{id}/claim (ดู routes/course_offering.py)
+    instructor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=True
     )
     cohort_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     academic_year: Mapped[int] = mapped_column(Integer, nullable=False)
