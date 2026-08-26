@@ -15,7 +15,17 @@ from .course_offering import (
     CourseOfferingUpdateSchema,
 )
 from .student import StudentSchema, StudentCreateSchema, StudentUpdateSchema
-from .enrollment import EnrollmentSchema, EnrollmentCreateSchema, EnrollmentUpdateSchema
+from .enrollment import (
+    EnrollmentSchema,
+    EnrollmentCreateSchema,
+    EnrollmentUpdateSchema,
+    BulkEnrollByCohortSchema,
+    BulkEnrollSchema,
+    EnrolledStudentBrief,
+    OtherSectionConflict,
+    BulkEnrollByCohortResult,
+    BulkEnrollResult,
+)
 from .clo import CLOSchema, CLOCreateSchema, CLOUpdateSchema
 from .clo_plo_mapping import (
     CLOPLOMappingSchema,
@@ -65,6 +75,12 @@ __all__ = [
     "EnrollmentSchema",
     "EnrollmentCreateSchema",
     "EnrollmentUpdateSchema",
+    "BulkEnrollByCohortSchema",
+    "BulkEnrollSchema",
+    "EnrolledStudentBrief",
+    "OtherSectionConflict",
+    "BulkEnrollByCohortResult",
+    "BulkEnrollResult",
     "CLOSchema",
     "CLOCreateSchema",
     "CLOUpdateSchema",
