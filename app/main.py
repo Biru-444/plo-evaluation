@@ -19,6 +19,7 @@ from app.routes import (
     item_clo,
     plo,
     plo_calculation,
+    roster_import,
     study_plan,
     students,
     users,
@@ -84,6 +85,7 @@ app.include_router(clo.router)
 app.include_router(clo_plo_mapping.router)
 app.include_router(assessment.router)
 app.include_router(item_clo.router)
+app.include_router(roster_import.router)
 
 
 if __name__ == "__main__":

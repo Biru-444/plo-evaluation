@@ -41,6 +41,7 @@ from .assessment import (
     StudentScoreUpdateSchema,
 )
 from .item_clo import ItemCLOSchema, ItemCLOCreateSchema, ItemCLOUpdateSchema
+from .roster_import import RosterImportInstructor, RosterImportResponse, RosterImportStudentRow
 
 __all__ = [
     "UserSchema",
@@ -96,4 +97,7 @@ __all__ = [
     "ItemCLOSchema",
     "ItemCLOCreateSchema",
     "ItemCLOUpdateSchema",
+    "RosterImportInstructor",
+    "RosterImportResponse",
+    "RosterImportStudentRow",
 ]

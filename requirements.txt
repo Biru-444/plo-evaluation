@@ -9,3 +9,6 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1  # passlib 1.7.4 breaks on bcrypt>=4.1 (removed __about__.__version__)
 python-jose[cryptography]==3.3.0
 python-multipart==0.0.6
+openpyxl==3.1.5
+xlrd==2.0.1  # อ่านไฟล์ .xls รูปแบบเก่า (มหาวิทยาลัยส่งรายชื่อนักศึกษามาเป็น .xls ไม่ใช่ .xlsx)
+olefile==0.47  # สำรองแกะ stream ตรงๆ เมื่อไฟล์ .xls จริงมี OLE2 container ที่ xlrd เองอ่านไม่ผ่าน
