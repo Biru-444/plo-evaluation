@@ -83,14 +83,19 @@ def upsert_students(db) -> tuple[int, int]:
             )
             created += 1
             continue
-        changed = False
-        for field, value in (
+        # Preserve names already on file (e.g. real names entered manually) -
+        # only fall back to blank for students that don't have one yet.
+        has_real_name = bool(student.first_name) or bool(student.last_name)
+        fields = [
             ("curriculum_id", CURRICULUM_ID),
-            ("first_name", ""),
-            ("last_name", ""),
             ("cohort_year", COHORT_YEAR),
             ("current_year_level", CURRENT_YEAR_LEVEL),
-        ):
+        ]
+        if not has_real_name:
+            fields.append(("first_name", ""))
+            fields.append(("last_name", ""))
+        changed = False
+        for field, value in fields:
             if getattr(student, field) != value:
                 setattr(student, field, value)
                 changed = True
