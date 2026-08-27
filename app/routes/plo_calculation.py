@@ -72,6 +72,7 @@ class CurriculumPLOAchievement(BaseModel):
     total_students: int
     plo_summary: list[PLOCohortSummaryItem]
     students: list[StudentPLOAchievement]
+    available_cohort_years: list[int] = []
 
 
 class YearlyPLOSummaryItem(BaseModel):
@@ -97,6 +98,7 @@ class CurriculumYearProgress(BaseModel):
     curriculum_id: int
     curriculum_name: str
     years: list[YearProgressItem]
+    available_cohort_years: list[int] = []
 
 
 def _calculate_plo_achievement_for_student(
@@ -246,6 +248,7 @@ def get_plo_achievement(
 @router.get("/achievement/cohort", response_model=CurriculumPLOAchievement)
 def get_cohort_plo_achievement(
     curriculum_id: int = Query(..., description="Curriculum ID"),
+    cohort_year: int | None = Query(None, description="กรองเฉพาะรุ่นที่เข้าเรียนปีนี้ (เช่น 66) - ไม่ใส่ = รวมทุกรุ่น"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -260,7 +263,20 @@ def get_cohort_plo_achievement(
         .all()
     )
 
-    students = db.query(Student).filter(Student.curriculum_id == curriculum_id).all()
+    available_cohort_years = sorted(
+        {
+            row[0]
+            for row in db.query(Student.cohort_year)
+            .filter(Student.curriculum_id == curriculum_id, Student.cohort_year.isnot(None))
+            .distinct()
+            .all()
+        }
+    )
+
+    students_query = db.query(Student).filter(Student.curriculum_id == curriculum_id)
+    if cohort_year is not None:
+        students_query = students_query.filter(Student.cohort_year == cohort_year)
+    students = students_query.all()
 
     if not students:
         return CurriculumPLOAchievement(
@@ -280,6 +296,7 @@ def get_cohort_plo_achievement(
                 for plo in plos
             ],
             students=[],
+            available_cohort_years=available_cohort_years,
         )
 
     student_achievements = [
@@ -322,12 +339,14 @@ def get_cohort_plo_achievement(
         total_students=total_students,
         plo_summary=plo_summary,
         students=students_sorted,
+        available_cohort_years=available_cohort_years,
     )
 
 
 @router.get("/achievement/by-year", response_model=CurriculumYearProgress)
 def get_plo_achievement_by_year(
     curriculum_id: int = Query(..., description="Curriculum ID"),
+    cohort_year: int | None = Query(None, description="กรองเฉพาะรุ่นที่เข้าเรียนปีนี้ (เช่น 66) - ไม่ใส่ = รวมทุกรุ่น"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -340,7 +359,21 @@ def get_plo_achievement_by_year(
         raise HTTPException(status_code=404, detail="Curriculum not found")
 
     plos = db.query(PLO).filter(PLO.curriculum_id == curriculum_id).order_by(PLO.code).all()
-    students = db.query(Student).filter(Student.curriculum_id == curriculum_id).all()
+
+    available_cohort_years = sorted(
+        {
+            row[0]
+            for row in db.query(Student.cohort_year)
+            .filter(Student.curriculum_id == curriculum_id, Student.cohort_year.isnot(None))
+            .distinct()
+            .all()
+        }
+    )
+
+    students_query = db.query(Student).filter(Student.curriculum_id == curriculum_id)
+    if cohort_year is not None:
+        students_query = students_query.filter(Student.cohort_year == cohort_year)
+    students = students_query.all()
     total_students = len(students)
 
     ylo_by_year = {
@@ -446,4 +479,5 @@ def get_plo_achievement_by_year(
         curriculum_id=curriculum.id,
         curriculum_name=curriculum.name,
         years=years,
+        available_cohort_years=available_cohort_years,
     )
