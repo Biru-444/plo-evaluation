@@ -5,8 +5,12 @@ Tests สำหรับ GET /courses/{course_id}/enrolled-students และ pl
 _student_passed_course_for_plo ใน plo_calculation.py ไม่ใช่ % เฉลี่ยแบบเดิม) รวมถึง edge case คะแนน
 ไม่ครบ/ไม่มีเลย
 
-null เกิดเฉพาะตอนวิชานี้ไม่มี CLO ผูกกับ PLO นี้เลย (ไม่มีอะไรให้คำนวณ) - ถ้ามี CLO ผูกอยู่แต่นักศึกษา
-ยังไม่ผ่านเกณฑ์ของ CLO ใดก็ตาม (รวมถึงไม่มีคะแนนเลย) จะได้ False ไม่ใช่ None
+plo_achieved เป็น null ("ยังไม่มีข้อมูลให้ประเมิน") ใน 2 กรณี: (1) วิชานี้ไม่มี CLO ผูกกับ PLO นี้เลย
+หรือ (2) มี CLO ผูกอยู่ แต่นักศึกษายังไม่มี record คะแนนบันทึกไว้เลยสักรายการสำหรับ CLO ที่เกี่ยวข้อง
+(ต่างจากได้คะแนน 0 จริงซึ่งนับเป็นข้อมูลแล้ว) - False เกิดเฉพาะเมื่อมี record คะแนนอยู่แล้วอย่างน้อย
+1 รายการในกลุ่ม CLO ที่เกี่ยวข้อง แล้วคำนวณตามเกณฑ์ผ่านของแต่ละ CLO ออกมาว่าไม่ถึง (รวมถึง CLO อื่นใน
+กลุ่มที่ยังไม่มี record เลยก็ยังนับเป็นไม่ผ่านตาม all-or-nothing ปกติ ตราบใดที่มีอย่างน้อย 1 CLO ในกลุ่ม
+ที่มี record แล้ว)
 
 ทุกเทสสร้างข้อมูลของตัวเองใน db_session (rollback อัตโนมัติหลังจบเทสตาม conftest.py) ไม่พึ่งข้อมูลที่มี
 อยู่ก่อนในฐานข้อมูลทดสอบเลย เพื่อไม่ให้เทสตัวหนึ่งกระทบอีกตัว
@@ -176,8 +180,10 @@ def test_all_clos_passed_returns_achieved_true(client, db_session, admin_user):
 
 
 def test_one_clo_without_score_makes_achieved_false(client, db_session, admin_user):
-    """มีคะแนนแค่ 1 ใน 2 CLO ที่ผูกกับ PLO นี้ (60% ผ่านเกณฑ์ กับไม่มีคะแนนเลย) -> plo_achieved False
-    (all-or-nothing - ต้องผ่านทุก CLO ที่ผูกกับ PLO นี้ CLO ที่ไม่มีคะแนนเลยถือว่าไม่ผ่านเกณฑ์)"""
+    """มีคะแนนบันทึกแล้วอย่างน้อย 1 ใน 2 CLO ที่ผูกกับ PLO นี้ (CLO-A ได้ 60% ผ่านเกณฑ์ กับ CLO-B ยังไม่มี
+    record คะแนนเลย) -> plo_achieved False ไม่ใช่ None (มี record คะแนนอยู่แล้วอย่างน้อย 1 รายการในกลุ่ม
+    จึงคำนวณได้ - all-or-nothing ต้องผ่านทุก CLO ที่ผูกกับ PLO นี้ CLO-B ที่ยังไม่มี record ถือว่าไม่ผ่าน
+    เกณฑ์ ทำให้ทั้งกลุ่มไม่ผ่าน)"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -213,10 +219,11 @@ def test_one_clo_without_score_makes_achieved_false(client, db_session, admin_us
     assert body[0]["plo_achieved"] is False
 
 
-def test_no_score_data_at_all_is_false_not_null(client, db_session, admin_user):
-    """ไม่มีคะแนนใน CLO ไหนของวิชานี้เลย (มี CLO ผูกกับ PLO อยู่ แค่ยังไม่กรอกคะแนน) -> plo_achieved
-    False (มี CLO ให้คำนวณจริง แค่ยังไม่ผ่านเกณฑ์ - ไม่ใช่ null เพราะ null สงวนไว้เฉพาะกรณีไม่มี CLO
-    ผูกกับ PLO นี้เลย)"""
+def test_no_recorded_score_at_all_is_null_not_false(client, db_session, admin_user):
+    """มี CLO ผูกกับ PLO อยู่ แต่นักศึกษาคนนี้ยังไม่มี record คะแนนบันทึกไว้เลยสักรายการ (อาจารย์ยังไม่
+    กรอกคะแนน - ไม่ใช่สอบตกจริง) -> plo_achieved ต้องเป็น None ("ยังไม่มีข้อมูลให้ประเมิน") ไม่ใช่ False
+    (False สงวนไว้เฉพาะกรณีมี record คะแนนแล้วแต่ไม่ถึงเกณฑ์ - ดู test_recorded_score_below_threshold_
+    returns_false ที่ใช้ CLO เดี่ยวเหมือนกันแต่มี record คะแนนจริงเทียบกัน)"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -233,6 +240,64 @@ def test_no_score_data_at_all_is_false_not_null(client, db_session, admin_user):
         admin_user_id=admin_user.id,
         student_id=None,
         score_obtained=None,
+    )
+    db_session.commit()
+
+    resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["plo_achieved"] is None
+
+
+def test_recorded_score_below_threshold_returns_false(client, db_session, admin_user):
+    """มี record คะแนนบันทึกไว้จริง (ไม่ใช่ไม่มีข้อมูล) แต่ได้ 40% ซึ่งต่ำกว่าเกณฑ์ผ่าน 60% ของ CLO นี้ ->
+    plo_achieved ต้องเป็น False ไม่ใช่ None (คนละเคสกับ test_no_recorded_score_at_all_is_null_not_false
+    ที่ใช้ CLO เดี่ยวเหมือนกันแต่ไม่มี record คะแนนเลย ต้องแยกผลลัพธ์กันชัดเจน)"""
+    fx = _make_base_fixtures(db_session)
+    _enroll_student(
+        db_session,
+        curriculum_id=fx["curriculum"].id,
+        offering_id=fx["offering"].id,
+        student_id="TEST001",
+    )
+    _add_clo_with_score(
+        db_session,
+        course_id=fx["course"].id,
+        offering_id=fx["offering"].id,
+        plo_id=fx["plo"].id,
+        clo_code="CLO-A",
+        admin_user_id=admin_user.id,
+        student_id="TEST001",
+        score_obtained=40.0,
+    )
+    db_session.commit()
+
+    resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["plo_achieved"] is False
+
+
+def test_recorded_score_of_zero_is_data_not_missing(client, db_session, admin_user):
+    """record คะแนนที่บันทึกไว้เป็น 0 จริง (นักศึกษาสอบได้ 0 คะแนน) ต้องนับเป็น "มีข้อมูลแล้ว" (record
+    มีอยู่จริง แค่ค่าเป็น 0) ไม่ใช่ "ไม่มีข้อมูล" - ผลลัพธ์ต้องเป็น False (ไม่ถึงเกณฑ์ผ่าน) ไม่ใช่ None
+    (ยืนยันว่า _clo_mastery_for_students_batch แยก "ไม่มี StudentScore row" ออกจาก "มี row ค่า 0" ถูกต้อง)"""
+    fx = _make_base_fixtures(db_session)
+    _enroll_student(
+        db_session,
+        curriculum_id=fx["curriculum"].id,
+        offering_id=fx["offering"].id,
+        student_id="TEST001",
+    )
+    _add_clo_with_score(
+        db_session,
+        course_id=fx["course"].id,
+        offering_id=fx["offering"].id,
+        plo_id=fx["plo"].id,
+        clo_code="CLO-A",
+        admin_user_id=admin_user.id,
+        student_id="TEST001",
+        score_obtained=0.0,
     )
     db_session.commit()
 

@@ -72,7 +72,15 @@ def get_course_enrolled_students(
     นักศึกษาทั้ง roster (ไม่ query ทีละคน) reuse _student_passed_course_for_plo ตัวเดียวกับที่ตัดสิน
     "บรรลุ PLO" ทุกที่ในระบบ (all-or-nothing ต่อ CLO - ต้องผ่านทุก CLO ที่ผูกกับ PLO นี้ แต่ละ CLO เทียบ
     กับ pass_threshold_percent ของตัวเอง ไม่ใช่ derive จากค่าเฉลี่ย %) ไม่มี logic คำนวณแยกที่อาจ drift
-    ไม่ตรงกัน"""
+    ไม่ตรงกัน
+
+    plo_achieved เป็น null ใน 2 กรณี: (1) วิชานี้ไม่มี CLO ผูกกับ PLO นี้เลย หรือ (2) มี CLO ผูกอยู่ แต่
+    นักศึกษาคนนี้ยังไม่มี "record" คะแนนบันทึกไว้เลยสักรายการสำหรับ CLO เหล่านั้น (ยังไม่มีข้อมูลให้
+    ประเมิน ต่างจากได้คะแนน 0 จริงซึ่งนับเป็นข้อมูลแล้ว) - เทียบ course_clo_ids กับ key ที่มีอยู่จริงใน
+    ผลลัพธ์ของ _clo_mastery_for_students_batch (ซึ่งมี key เฉพาะ CLO ที่มี StudentScore record จริง
+    อย่างน้อย 1 แถวเท่านั้น ไม่ใช่ CLO ที่คำนวณได้ 0%) ถ้ามี record คะแนนอยู่แล้วอย่างน้อย 1 รายการใน
+    CLO ที่เกี่ยวข้อง ถึงจะเรียก _student_passed_course_for_plo เพื่อได้ True/False จริง (ซึ่ง CLO ที่ยัง
+    ไม่มี record ในกลุ่มนี้จะยังคงถูกนับเป็น "ไม่ผ่าน" ตาม all-or-nothing ตามปกติ)"""
     course = db.get(Course, course_id)
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -104,8 +112,15 @@ def get_course_enrolled_students(
                 db, student_ids, course_id_filter={course_id}
             )
             for student_id in student_ids:
-                plo_achieved_by_student_id[student_id] = _student_passed_course_for_plo(
-                    course_clo_ids, clo_mastery_by_student.get(student_id, {}), clo_pass_thresholds
+                student_mastery = clo_mastery_by_student.get(student_id, {})
+                # key ปรากฏใน student_mastery เฉพาะ CLO ที่มี StudentScore record จริงอย่างน้อย 1 แถว
+                # (ดู _clo_mastery_for_students_batch) - ไม่มี key ร่วมกับ course_clo_ids เลยสักตัว แปลว่า
+                # ยังไม่มีคะแนนบันทึกให้ CLO ที่เกี่ยวข้องกับ PLO นี้เลยสักรายการ (ต่างจากได้ 0 จริง)
+                has_any_recorded_score = bool(course_clo_ids & student_mastery.keys())
+                plo_achieved_by_student_id[student_id] = (
+                    _student_passed_course_for_plo(course_clo_ids, student_mastery, clo_pass_thresholds)
+                    if has_any_recorded_score
+                    else None
                 )
         else:
             # วิชานี้ไม่มี CLO ผูกกับ PLO ข้อนี้เลย (ไม่ว่าเพราะไม่ใช่ primary หรือยังไม่มี
