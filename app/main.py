@@ -24,6 +24,7 @@ from app.routes import (
     students,
     users,
     ylo,
+    ylo_calculation,
     ylo_plo_mapping,
 )
 
@@ -74,6 +75,7 @@ app.include_router(plo_calculation.router)
 app.include_router(clo_calculation.router)
 app.include_router(plo.router)
 app.include_router(ylo.router)
+app.include_router(ylo_calculation.router)
 app.include_router(ylo_plo_mapping.router)
 app.include_router(courses.router)
 app.include_router(course_plo.router)

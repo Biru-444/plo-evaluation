@@ -61,3 +61,18 @@ class BulkEnrollResult(BaseModel):
     not_found: list[str]
     wrong_curriculum: list[str] = []
     already_in_other_section: list[OtherSectionConflict] = []
+
+
+class RecommendedOfferingSchema(BaseModel):
+    """วิชาที่ study_plan แนะนำสำหรับนักศึกษาคนนี้ (year_level <= current_year_level) และมี
+    course_offering จริงรองรับแล้ว แต่ยังไม่ได้ลงทะเบียน - ใช้เป็น "คำแนะนำ" กดเลือกในหน้าลงทะเบียน
+    ด้วยตนเอง ไม่ auto-enroll (ดู _build_recommended_offerings ใน routes/students.py)"""
+
+    offering_id: int
+    course_id: int
+    course_code: str
+    name_th: str
+    academic_year: int
+    semester: int
+    section: str
+    year_level: int

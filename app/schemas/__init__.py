@@ -3,7 +3,13 @@ Pydantic Schemas for Request/Response Data Validation
 """
 from .user import UserSchema, UserCreateSchema, UserUpdateSchema
 from .curriculum import CurriculumSchema, CurriculumCreateSchema, CurriculumUpdateSchema
-from .plo import PLOSchema, PLOCreateSchema, PLOUpdateSchema
+from .plo import (
+    PLOSchema,
+    PLOCreateSchema,
+    PLOUpdateSchema,
+    PLOLinkedCourseSchema,
+    PLOCoursePlanItemSchema,
+)
 from .ylo import YLOSchema, YLOCreateSchema, YLOUpdateSchema
 from .ylo_plo_mapping import YLOPLOMappingSchema, YLOPLOMappingCreateSchema
 from .course import CourseSchema, CourseCreateSchema, CourseUpdateSchema
@@ -25,6 +31,7 @@ from .enrollment import (
     OtherSectionConflict,
     BulkEnrollByCohortResult,
     BulkEnrollResult,
+    RecommendedOfferingSchema,
 )
 from .clo import CLOSchema, CLOCreateSchema, CLOUpdateSchema
 from .clo_plo_mapping import (
