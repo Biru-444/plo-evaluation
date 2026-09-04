@@ -23,11 +23,14 @@ class StudentSchema(BaseModel):
 
 
 class EnrolledStudentSchema(StudentSchema):
-    """StudentSchema + clo_mastery_percent (0-100) - เฉพาะ GET /courses/{course_id}/enrolled-students
-    เมื่อมี query param plo_id ส่งมา (ดู courses.py) เป็น None เสมอเมื่อไม่ได้ส่ง plo_id หรือเมื่อวิชานี้
-    ไม่มี CLO ผูกกับ PLO ข้อนั้นเลย/นักศึกษาคนนี้ยังไม่มีคะแนนให้ CLO ไหนของวิชานี้เลย"""
+    """StudentSchema + plo_achieved (ผ่าน/ไม่ผ่าน) - เฉพาะ GET /courses/{course_id}/enrolled-students
+    เมื่อมี query param plo_id ส่งมา (ดู courses.py) None ("ยังไม่มีข้อมูลให้ประเมิน") ใน 2 กรณี: ไม่ได้
+    ส่ง plo_id เลย, หรือส่งมาแต่วิชานี้ไม่มี CLO ผูกกับ PLO ข้อนั้นเลย/นักศึกษาคนนี้ยังไม่มี record คะแนน
+    บันทึกไว้เลยสักรายการสำหรับ CLO ที่เกี่ยวข้อง (ต่างจากได้คะแนน 0 จริงซึ่งนับเป็นข้อมูลแล้ว) - False
+    เกิดเฉพาะเมื่อมี record คะแนนอยู่แล้วอย่างน้อย 1 รายการ แล้วคำนวณตามเกณฑ์ผ่านแล้วไม่ถึง (all-or-nothing
+    ต่อ CLO)"""
 
-    clo_mastery_percent: float | None = None
+    plo_achieved: bool | None = None
 
 
 class StudentCreateSchema(BaseModel):
