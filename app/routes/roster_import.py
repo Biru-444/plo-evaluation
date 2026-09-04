@@ -11,6 +11,8 @@
 
 หลักการ import (ตามที่ผู้ใช้ยืนยัน):
 - ไฟล์คือความจริง (authoritative) — ถ้านักศึกษามีอยู่แล้วแต่ชื่อในไฟล์ไม่ตรงกับในระบบ ให้แก้ตามไฟล์
+- ค่า Sec ในไฟล์ = student.section ของนักศึกษาทุกคนในไฟล์นั้น (หมู่ประจำตัว ไม่ใช่ของวิชา) — ถ้าคนคนนั้น
+  เคยถูกเซ็ตหมู่จากไฟล์วิชาอื่นไว้ก่อนแล้วค่าไม่ตรงกัน ให้ไฟล์ที่ import ล่าสุดทับค่าเดิมเสมอ (หลักการเดียวกับชื่อ)
 - ถ้ายังไม่มี course_offering ตรงกับวิชา/ปีการศึกษา/ภาคเรียน/section ในไฟล์ ให้สร้างให้อัตโนมัติ
 - ถ้าชื่อผู้สอนในไฟล์ไม่ตรงกับ user ในระบบ ให้สร้างบัญชีอาจารย์จริงให้เลย (username รูปแบบ
   "ajarn<id>" + รหัสผ่านชั่วคราวสุ่ม แสดงครั้งเดียวตอนสร้าง - เหมือน ajarn.somsak/ajarn.suda ที่มีอยู่
@@ -388,7 +390,7 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
     # --- นักศึกษา ---
     student_rows: list[RosterImportStudentRow] = []
     to_enroll_ids: list[str] = []
-    counts = {"create": 0, "update_name": 0, "unchanged": 0, "error": 0}
+    counts = {"create": 0, "update_info": 0, "unchanged": 0, "error": 0}
     for i, (sid, title, first, last) in enumerate(parsed.students, start=1):
         existing_student = db.get(Student, sid)
         if existing_student is None:
@@ -404,6 +406,7 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
                     first_name=first,
                     last_name=last,
                     title=title,
+                    section=parsed.section,
                     cohort_year=parsed.cohort_year if parsed.cohort_year is not None else int(sid[:2]),
                     current_year_level=level,
                 ))
@@ -424,20 +427,32 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
                 or existing_student.last_name != last
                 or (existing_student.title or None) != (title or None)
             )
-            if name_changed:
-                row = RosterImportStudentRow(
-                    line_no=i, student_id=sid, title=title, first_name=first, last_name=last,
-                    action="update_name",
-                    detail=(
+            # ไฟล์นี้ผูกกับ course_offering เดียวที่มี section เดียว - นักศึกษาทุกคนในไฟล์นี้จึงได้ค่า
+            # หมู่เดียวกัน ถ้าเคยถูกเซ็ตหมู่จากไฟล์อื่นมาก่อน (เช่นวิชาอื่น section ไม่ตรงกัน) ให้ไฟล์ที่
+            # import ล่าสุดทับค่าเดิมเสมอ - ใช้หลักการเดียวกับชื่อ-นามสกุล (ไฟล์มหาวิทยาลัยถูกต้องกว่า)
+            section_changed = existing_student.section != parsed.section
+            if name_changed or section_changed:
+                detail_parts = []
+                if name_changed:
+                    detail_parts.append(
                         f"ชื่อเดิมในระบบ: {existing_student.title or ''} {existing_student.first_name} "
                         f"{existing_student.last_name} -> ในไฟล์: {title or ''} {first} {last}"
-                    ),
+                    )
+                if section_changed:
+                    detail_parts.append(
+                        f"หมู่เดิมในระบบ: {existing_student.section or '(ไม่ระบุ)'} -> ในไฟล์: {parsed.section}"
+                    )
+                row = RosterImportStudentRow(
+                    line_no=i, student_id=sid, title=title, first_name=first, last_name=last,
+                    action="update_info",
+                    detail=" | ".join(detail_parts),
                 )
-                counts["update_name"] += 1
+                counts["update_info"] += 1
                 if commit:
                     existing_student.first_name = first
                     existing_student.last_name = last
                     existing_student.title = title
+                    existing_student.section = parsed.section
             else:
                 row = RosterImportStudentRow(
                     line_no=i, student_id=sid, title=title, first_name=first, last_name=last, action="unchanged",
@@ -504,7 +519,7 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
     summary = {
         "students_total": len(parsed.students),
         "students_create": counts["create"],
-        "students_update_name": counts["update_name"],
+        "students_update_info": counts["update_info"],
         "students_unchanged": counts["unchanged"],
         "students_error": counts["error"],
         "enrollments_added": enrollments_added,

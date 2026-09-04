@@ -15,8 +15,8 @@ class RosterImportStudentRow(BaseModel):
     title: str | None = None
     first_name: str
     last_name: str
-    # "create" = จะสร้าง/สร้างนักศึกษาใหม่, "update_name" = มีอยู่แล้วแต่ชื่อในไฟล์ไม่ตรง (จะแก้ตามไฟล์),
-    # "unchanged" = มีอยู่แล้วและชื่อตรงกัน, "error" = ข้าม (เช่น อยู่คนละหลักสูตร)
+    # "create" = จะสร้าง/สร้างนักศึกษาใหม่, "update_info" = มีอยู่แล้วแต่ชื่อและ/หรือหมู่ในไฟล์ไม่ตรง (จะแก้ตามไฟล์),
+    # "unchanged" = มีอยู่แล้วและชื่อ+หมู่ตรงกัน, "error" = ข้าม (เช่น อยู่คนละหลักสูตร)
     action: str
     detail: str | None = None
 

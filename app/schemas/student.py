@@ -17,6 +17,7 @@ class StudentSchema(BaseModel):
     last_name: str
     title: str | None = None
     status: StudentStatus = "กำลังศึกษา"
+    section: str | None = None
     cohort_year: int
     current_year_level: int
 
@@ -33,6 +34,7 @@ class StudentCreateSchema(BaseModel):
     last_name: str
     title: str | None = None
     status: StudentStatus = "กำลังศึกษา"
+    section: str | None = None
     cohort_year: int
     current_year_level: int
 
@@ -44,5 +46,6 @@ class StudentUpdateSchema(BaseModel):
     last_name: str | None = None
     title: str | None = None
     status: StudentStatus | None = None
+    section: str | None = None
     cohort_year: int | None = None
     current_year_level: int | None = None

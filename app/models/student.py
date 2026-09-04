@@ -18,6 +18,7 @@ class Student(Base):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     title: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="กำลังศึกษา")
+    section: Mapped[str | None] = mapped_column(String(20), nullable=True)
     cohort_year: Mapped[int] = mapped_column(Integer, nullable=False)
     current_year_level: Mapped[int] = mapped_column(Integer, nullable=False)
 

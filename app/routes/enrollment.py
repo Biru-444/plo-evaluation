@@ -183,12 +183,15 @@ def _parse_roster_file(filename: str, content: bytes) -> list[str]:
 @router.get("", response_model=list[EnrollmentSchema])
 def list_enrollments(
     offering_id: int | None = None,
+    student_id: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     query = db.query(Enrollment)
     if offering_id is not None:
         query = query.filter(Enrollment.offering_id == offering_id)
+    if student_id is not None:
+        query = query.filter(Enrollment.student_id == student_id)
     return query.order_by(Enrollment.id).all()
 
 
