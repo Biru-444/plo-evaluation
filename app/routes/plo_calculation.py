@@ -345,21 +345,6 @@ def _clo_mastery_for_students_batch(
     return result
 
 
-def _course_plo_mastery_percent(
-    clo_mastery: dict[int, Decimal], course_clo_ids: set[int]
-) -> Decimal | None:
-    """สรุป CLO mastery ของนักศึกษาคนหนึ่งสำหรับวิชาหนึ่ง เทียบกับ PLO ข้อหนึ่ง ให้เป็นตัวเลข % เดียว
-    (เฉลี่ยแบบไม่ถ่วงน้ำหนักของ mastery ต่อ CLO ที่มีข้อมูล - course_clo_ids คือ CLO ของวิชานั้นที่ผูกกับ
-    PLO ข้อนี้โดยเฉพาะ ตามที่ _build_plo_requirements คำนวณไว้แล้ว) CLO ที่ไม่มีคะแนนเลยถูกข้ามจากค่าเฉลี่ย
-    (ไม่นับเป็น 0 - เพราะ "ไม่มีข้อมูล" กับ "ได้ 0%" เป็นคนละความหมาย เหมือนที่ _clo_passed ปฏิบัติ) คืน
-    None ถ้าไม่มี CLO ไหนมีข้อมูลเลยสักตัว (ไม่ใช่ course_clo_ids ว่างเปล่า - นั่นแปลว่าวิชานี้ไม่มี CLO
-    ผูกกับ PLO นี้จริงๆ ก็ยัง None เหมือนกัน แค่คนละเหตุผล)"""
-    available = [clo_mastery[clo_id] for clo_id in course_clo_ids if clo_id in clo_mastery]
-    if not available:
-        return None
-    return sum(available) / len(available)
-
-
 def _calculate_plo_achievement_for_student(
     db: Session,
     student: Student,

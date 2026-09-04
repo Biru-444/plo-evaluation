@@ -1,7 +1,12 @@
 """
 Tests สำหรับ GET /courses/{course_id}/enrolled-students และ plo_id (optional) query param ใหม่ -
 ครอบคลุมทั้งพฤติกรรมเดิม (ไม่ส่ง plo_id ต้องเหมือนเดิมทุกประการ ไม่กระทบ caller เดิม) และพฤติกรรมใหม่
-(clo_mastery_percent) รวมถึง edge case คะแนนไม่ครบ/ไม่มีเลย
+(plo_achieved: bool | None - ผ่าน/ไม่ผ่านวิชานี้สำหรับ PLO ข้อนี้ แบบ all-or-nothing ต่อ CLO เดียวกับ
+_student_passed_course_for_plo ใน plo_calculation.py ไม่ใช่ % เฉลี่ยแบบเดิม) รวมถึง edge case คะแนน
+ไม่ครบ/ไม่มีเลย
+
+null เกิดเฉพาะตอนวิชานี้ไม่มี CLO ผูกกับ PLO นี้เลย (ไม่มีอะไรให้คำนวณ) - ถ้ามี CLO ผูกอยู่แต่นักศึกษา
+ยังไม่ผ่านเกณฑ์ของ CLO ใดก็ตาม (รวมถึงไม่มีคะแนนเลย) จะได้ False ไม่ใช่ None
 
 ทุกเทสสร้างข้อมูลของตัวเองใน db_session (rollback อัตโนมัติหลังจบเทสตาม conftest.py) ไม่พึ่งข้อมูลที่มี
 อยู่ก่อนในฐานข้อมูลทดสอบเลย เพื่อไม่ให้เทสตัวหนึ่งกระทบอีกตัว
@@ -82,8 +87,9 @@ def _add_clo_with_score(
     score_obtained: float | None,
     total_score: float = 100.0,
 ) -> CLO:
-    """สร้าง CLO 1 ตัวผูกกับ plo_id ที่ให้มา พร้อม assessment_item+item_clo 1 ชุด - ถ้า student_id +
-    score_obtained ไม่ใช่ None จะกรอกคะแนนให้นักศึกษาคนนั้นด้วย (ไม่กรอก = จำลอง "ยังไม่มีคะแนนเลย")"""
+    """สร้าง CLO 1 ตัวผูกกับ plo_id ที่ให้มา พร้อม assessment_item+item_clo 1 ชุด (pass_threshold_percent
+    60.00) - ถ้า student_id + score_obtained ไม่ใช่ None จะกรอกคะแนนให้นักศึกษาคนนั้นด้วย (ไม่กรอก =
+    จำลอง "ยังไม่มีคะแนนเลย")"""
     clo = CLO(
         course_id=course_id,
         code=clo_code,
@@ -113,8 +119,8 @@ def _add_clo_with_score(
     return clo
 
 
-def test_without_plo_id_mastery_is_always_null(client, db_session):
-    """ไม่ส่ง plo_id เลย - ต้องเหมือนพฤติกรรมเดิมทุกประการ (clo_mastery_percent เป็น null ทุกคน)"""
+def test_without_plo_id_achieved_is_always_null(client, db_session):
+    """ไม่ส่ง plo_id เลย - ต้องเหมือนพฤติกรรมเดิมทุกประการ (plo_achieved เป็น null ทุกคน)"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -129,11 +135,11 @@ def test_without_plo_id_mastery_is_always_null(client, db_session):
     body = resp.json()
     assert len(body) == 1
     assert body[0]["id"] == "TEST001"
-    assert body[0]["clo_mastery_percent"] is None
+    assert body[0]["plo_achieved"] is None
 
 
-def test_full_score_data_averages_correctly(client, db_session, admin_user):
-    """คะแนนครบทุก CLO ที่ผูกกับ PLO นี้ (2 CLO, 90% กับ 70%) -> เฉลี่ย = 80.0"""
+def test_all_clos_passed_returns_achieved_true(client, db_session, admin_user):
+    """คะแนนผ่านเกณฑ์ทุก CLO ที่ผูกกับ PLO นี้ (2 CLO, 90% กับ 70%, เกณฑ์ผ่าน 60%) -> plo_achieved True"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -166,12 +172,12 @@ def test_full_score_data_averages_correctly(client, db_session, admin_user):
     resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
     assert resp.status_code == 200
     body = resp.json()
-    assert body[0]["clo_mastery_percent"] == 80.0
+    assert body[0]["plo_achieved"] is True
 
 
-def test_partial_score_data_skips_missing_clo_not_zero(client, db_session, admin_user):
-    """มีคะแนนแค่ 1 ใน 2 CLO ที่ผูกกับ PLO นี้ (60% กับไม่มีคะแนนเลย) -> เฉลี่ยแค่ตัวที่มีข้อมูล = 60.0
-    (ไม่ใช่ (60+0)/2=30 - CLO ที่ไม่มีคะแนนเลยต้องไม่ถูกนับเป็น 0)"""
+def test_one_clo_without_score_makes_achieved_false(client, db_session, admin_user):
+    """มีคะแนนแค่ 1 ใน 2 CLO ที่ผูกกับ PLO นี้ (60% ผ่านเกณฑ์ กับไม่มีคะแนนเลย) -> plo_achieved False
+    (all-or-nothing - ต้องผ่านทุก CLO ที่ผูกกับ PLO นี้ CLO ที่ไม่มีคะแนนเลยถือว่าไม่ผ่านเกณฑ์)"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -204,11 +210,13 @@ def test_partial_score_data_skips_missing_clo_not_zero(client, db_session, admin
     resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
     assert resp.status_code == 200
     body = resp.json()
-    assert body[0]["clo_mastery_percent"] == 60.0
+    assert body[0]["plo_achieved"] is False
 
 
-def test_no_score_data_at_all_is_null_not_zero(client, db_session, admin_user):
-    """ไม่มีคะแนนใน CLO ไหนของวิชานี้เลย (มี CLO ผูกกับ PLO อยู่ แค่ยังไม่กรอกคะแนน) -> null ไม่ใช่ 0"""
+def test_no_score_data_at_all_is_false_not_null(client, db_session, admin_user):
+    """ไม่มีคะแนนใน CLO ไหนของวิชานี้เลย (มี CLO ผูกกับ PLO อยู่ แค่ยังไม่กรอกคะแนน) -> plo_achieved
+    False (มี CLO ให้คำนวณจริง แค่ยังไม่ผ่านเกณฑ์ - ไม่ใช่ null เพราะ null สงวนไว้เฉพาะกรณีไม่มี CLO
+    ผูกกับ PLO นี้เลย)"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -231,7 +239,7 @@ def test_no_score_data_at_all_is_null_not_zero(client, db_session, admin_user):
     resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
     assert resp.status_code == 200
     body = resp.json()
-    assert body[0]["clo_mastery_percent"] is None
+    assert body[0]["plo_achieved"] is False
 
 
 def test_plo_with_no_clo_plo_mapping_at_all_returns_null_no_error(client, db_session):
@@ -248,7 +256,7 @@ def test_plo_with_no_clo_plo_mapping_at_all_returns_null_no_error(client, db_ses
     resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
     assert resp.status_code == 200
     body = resp.json()
-    assert body[0]["clo_mastery_percent"] is None
+    assert body[0]["plo_achieved"] is None
 
 
 def test_secondary_course_plo_excluded_same_as_null(client, db_session, admin_user):
@@ -279,7 +287,7 @@ def test_secondary_course_plo_excluded_same_as_null(client, db_session, admin_us
     resp = client.get(f"/courses/{fx['course'].id}/enrolled-students?plo_id={fx['plo'].id}")
     assert resp.status_code == 200
     body = resp.json()
-    assert body[0]["clo_mastery_percent"] is None
+    assert body[0]["plo_achieved"] is None
 
 
 def test_invalid_plo_id_returns_404(client, db_session):

@@ -23,11 +23,12 @@ class StudentSchema(BaseModel):
 
 
 class EnrolledStudentSchema(StudentSchema):
-    """StudentSchema + clo_mastery_percent (0-100) - เฉพาะ GET /courses/{course_id}/enrolled-students
+    """StudentSchema + plo_achieved (ผ่าน/ไม่ผ่าน) - เฉพาะ GET /courses/{course_id}/enrolled-students
     เมื่อมี query param plo_id ส่งมา (ดู courses.py) เป็น None เสมอเมื่อไม่ได้ส่ง plo_id หรือเมื่อวิชานี้
-    ไม่มี CLO ผูกกับ PLO ข้อนั้นเลย/นักศึกษาคนนี้ยังไม่มีคะแนนให้ CLO ไหนของวิชานี้เลย"""
+    ไม่มี CLO ผูกกับ PLO ข้อนั้นเลย - ถ้ามี CLO ผูกอยู่แต่นักศึกษาคนนี้ยังไม่มีคะแนน/ยังไม่ผ่านเกณฑ์ของ
+    CLO ใดก็ตาม จะได้ False ไม่ใช่ None (all-or-nothing ต่อ CLO)"""
 
-    clo_mastery_percent: float | None = None
+    plo_achieved: bool | None = None
 
 
 class StudentCreateSchema(BaseModel):

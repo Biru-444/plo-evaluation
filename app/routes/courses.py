@@ -18,7 +18,7 @@ from app.schemas import (
 from app.routes.plo_calculation import (
     _build_plo_requirements,
     _clo_mastery_for_students_batch,
-    _course_plo_mastery_percent,
+    _student_passed_course_for_plo,
 )
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
@@ -53,8 +53,8 @@ def get_course_enrolled_students(
     plo_id: int | None = Query(
         None,
         description=(
-            "ถ้าส่งมา จะคำนวณ clo_mastery_percent ของนักศึกษาแต่ละคนในวิชานี้ เทียบกับ PLO ข้อนี้ "
-            "เพิ่มมาในแต่ละ item ของ response ด้วย (ไม่ส่ง = clo_mastery_percent เป็น null ทุกคน "
+            "ถ้าส่งมา จะคำนวณ plo_achieved (ผ่าน/ไม่ผ่าน) ของนักศึกษาแต่ละคนในวิชานี้ เทียบกับ PLO ข้อนี้ "
+            "เพิ่มมาในแต่ละ item ของ response ด้วย (ไม่ส่ง = plo_achieved เป็น null ทุกคน "
             "พฤติกรรมเดิมทุกประการ ไม่กระทบ caller เดิม)"
         ),
     ),
@@ -68,10 +68,11 @@ def get_course_enrolled_students(
     นักศึกษาคนนั้นเข้าเรียนรุ่นไหนจริง) ไม่ต้องกรองด้วย curriculum_id เพิ่ม เพราะ course_id หนึ่งอยู่ได้
     แค่หลักสูตรเดียวอยู่แล้ว (Course.curriculum_id)
 
-    plo_id (optional): คำนวณ clo_mastery_percent แบบ batch เดียวให้นักศึกษาทั้ง roster (ไม่ query
-    ทีละคน) reuse ตรรกะเดียวกับที่ตัดสิน "% บรรลุ PLO" ทุกที่ (_build_plo_requirements,
-    _clo_mastery_for_students_batch, _course_plo_mastery_percent จาก plo_calculation.py) ไม่มี logic
-    คำนวณแยกที่อาจ drift ไม่ตรงกัน"""
+    plo_id (optional): คำนวณ plo_achieved (ผ่าน/ไม่ผ่านวิชานี้สำหรับ PLO ข้อนี้) แบบ batch เดียวให้
+    นักศึกษาทั้ง roster (ไม่ query ทีละคน) reuse _student_passed_course_for_plo ตัวเดียวกับที่ตัดสิน
+    "บรรลุ PLO" ทุกที่ในระบบ (all-or-nothing ต่อ CLO - ต้องผ่านทุก CLO ที่ผูกกับ PLO นี้ แต่ละ CLO เทียบ
+    กับ pass_threshold_percent ของตัวเอง ไม่ใช่ derive จากค่าเฉลี่ย %) ไม่มี logic คำนวณแยกที่อาจ drift
+    ไม่ตรงกัน"""
     course = db.get(Course, course_id)
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -93,9 +94,9 @@ def get_course_enrolled_students(
 
     students = query.order_by(Student.first_name, Student.last_name).all()
 
-    mastery_percent_by_student_id: dict[str, float | None] = {}
+    plo_achieved_by_student_id: dict[str, bool | None] = {}
     if plo_id is not None and students:
-        plo_requirements, _ = _build_plo_requirements(db, course.curriculum_id)
+        plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, course.curriculum_id)
         course_clo_ids = plo_requirements.get(plo_id, {}).get(course_id, set())
         if course_clo_ids:
             student_ids = [s.id for s in students]
@@ -103,19 +104,18 @@ def get_course_enrolled_students(
                 db, student_ids, course_id_filter={course_id}
             )
             for student_id in student_ids:
-                percent = _course_plo_mastery_percent(
-                    clo_mastery_by_student.get(student_id, {}), course_clo_ids
+                plo_achieved_by_student_id[student_id] = _student_passed_course_for_plo(
+                    course_clo_ids, clo_mastery_by_student.get(student_id, {}), clo_pass_thresholds
                 )
-                mastery_percent_by_student_id[student_id] = float(percent) if percent is not None else None
         else:
             # วิชานี้ไม่มี CLO ผูกกับ PLO ข้อนี้เลย (ไม่ว่าเพราะไม่ใช่ primary หรือยังไม่มี
             # clo_plo_mapping จริง) - ไม่มีอะไรให้คำนวณ ไม่ใช่ error แค่ null ทุกคน
-            mastery_percent_by_student_id = {s.id: None for s in students}
+            plo_achieved_by_student_id = {s.id: None for s in students}
 
     return [
         EnrolledStudentSchema(
             **StudentSchema.model_validate(s).model_dump(),
-            clo_mastery_percent=mastery_percent_by_student_id.get(s.id) if plo_id is not None else None,
+            plo_achieved=plo_achieved_by_student_id.get(s.id) if plo_id is not None else None,
         )
         for s in students
     ]
