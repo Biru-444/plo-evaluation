@@ -273,6 +273,93 @@ def _clo_mastery_for_student(
     }
 
 
+def _clo_mastery_for_students_batch(
+    db: Session, student_ids: list[str], course_id_filter: set[int] | None = None
+) -> dict[str, dict[int, Decimal]]:
+    """เหมือน _clo_mastery_for_student ทุกประการ (สูตร weighted average เดียวกัน) แต่คำนวณให้หลายคน
+    พร้อมกันด้วย query ชุดเดียว (ไม่วนเรียก _clo_mastery_for_student ทีละคนในลูป ซึ่งจะเป็น N+1 query
+    ถ้า roster มีนักศึกษาเยอะ) - ใช้ตอนต้องได้ CLO mastery ของนักศึกษาทั้ง roster วิชาเดียวกันพร้อมกัน
+    (ดู GET /courses/{course_id}/enrolled-students?plo_id=...) คืนค่า {student_id: {clo_id: mastery}}
+    ครบทุก student_id ที่ส่งมาเสมอ (dict ว่างถ้าคนนั้นไม่มีข้อมูลเลย ไม่ใช่ key หายไป)"""
+    result: dict[str, dict[int, Decimal]] = {sid: {} for sid in student_ids}
+    if not student_ids:
+        return result
+
+    offering_query = db.query(Enrollment.student_id, Enrollment.offering_id).filter(
+        Enrollment.student_id.in_(student_ids)
+    )
+    if course_id_filter is not None:
+        offering_query = offering_query.join(
+            CourseOffering, CourseOffering.id == Enrollment.offering_id
+        ).filter(CourseOffering.course_id.in_(course_id_filter))
+    enrollment_rows = offering_query.all()
+
+    offering_ids_by_student: dict[str, set[int]] = {}
+    all_offering_ids: set[int] = set()
+    for student_id, offering_id in enrollment_rows:
+        offering_ids_by_student.setdefault(student_id, set()).add(offering_id)
+        all_offering_ids.add(offering_id)
+
+    if not all_offering_ids:
+        return result
+
+    items = db.query(AssessmentItem).filter(AssessmentItem.offering_id.in_(all_offering_ids)).all()
+    item_by_id: dict[int, AssessmentItem] = {item.id: item for item in items}
+    if not item_by_id:
+        return result
+
+    item_clos = db.query(ItemCLO).filter(ItemCLO.item_id.in_(item_by_id.keys())).all()
+    scores = (
+        db.query(StudentScore)
+        .filter(
+            StudentScore.student_id.in_(student_ids),
+            StudentScore.item_id.in_(item_by_id.keys()),
+        )
+        .all()
+    )
+    score_by_student_item: dict[tuple[str, int], Decimal] = {
+        (s.student_id, s.item_id): s.score_obtained for s in scores
+    }
+
+    for student_id in student_ids:
+        enrolled_offering_ids = offering_ids_by_student.get(student_id)
+        if not enrolled_offering_ids:
+            continue
+        clo_weighted_sum: dict[int, Decimal] = {}
+        clo_weight_total: dict[int, Decimal] = {}
+        for ic in item_clos:
+            item = item_by_id.get(ic.item_id)
+            if item is None or item.offering_id not in enrolled_offering_ids:
+                continue
+            score = score_by_student_item.get((student_id, ic.item_id))
+            if score is None or item.total_score <= 0:
+                continue
+            item_percent = (score / item.total_score) * Decimal(100)
+            clo_weighted_sum[ic.clo_id] = clo_weighted_sum.get(ic.clo_id, Decimal(0)) + item_percent * ic.weight_percent
+            clo_weight_total[ic.clo_id] = clo_weight_total.get(ic.clo_id, Decimal(0)) + ic.weight_percent
+        result[student_id] = {
+            clo_id: clo_weighted_sum[clo_id] / clo_weight_total[clo_id]
+            for clo_id in clo_weighted_sum
+            if clo_weight_total[clo_id] > 0
+        }
+    return result
+
+
+def _course_plo_mastery_percent(
+    clo_mastery: dict[int, Decimal], course_clo_ids: set[int]
+) -> Decimal | None:
+    """สรุป CLO mastery ของนักศึกษาคนหนึ่งสำหรับวิชาหนึ่ง เทียบกับ PLO ข้อหนึ่ง ให้เป็นตัวเลข % เดียว
+    (เฉลี่ยแบบไม่ถ่วงน้ำหนักของ mastery ต่อ CLO ที่มีข้อมูล - course_clo_ids คือ CLO ของวิชานั้นที่ผูกกับ
+    PLO ข้อนี้โดยเฉพาะ ตามที่ _build_plo_requirements คำนวณไว้แล้ว) CLO ที่ไม่มีคะแนนเลยถูกข้ามจากค่าเฉลี่ย
+    (ไม่นับเป็น 0 - เพราะ "ไม่มีข้อมูล" กับ "ได้ 0%" เป็นคนละความหมาย เหมือนที่ _clo_passed ปฏิบัติ) คืน
+    None ถ้าไม่มี CLO ไหนมีข้อมูลเลยสักตัว (ไม่ใช่ course_clo_ids ว่างเปล่า - นั่นแปลว่าวิชานี้ไม่มี CLO
+    ผูกกับ PLO นี้จริงๆ ก็ยัง None เหมือนกัน แค่คนละเหตุผล)"""
+    available = [clo_mastery[clo_id] for clo_id in course_clo_ids if clo_id in clo_mastery]
+    if not available:
+        return None
+    return sum(available) / len(available)
+
+
 def _calculate_plo_achievement_for_student(
     db: Session,
     student: Student,

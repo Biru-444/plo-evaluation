@@ -12,3 +12,7 @@ python-multipart==0.0.6
 openpyxl==3.1.5
 xlrd==2.0.1  # อ่านไฟล์ .xls รูปแบบเก่า (มหาวิทยาลัยส่งรายชื่อนักศึกษามาเป็น .xls ไม่ใช่ .xlsx)
 olefile==0.47  # สำรองแกะ stream ตรงๆ เมื่อไฟล์ .xls จริงมี OLE2 container ที่ xlrd เองอ่านไม่ผ่าน
+
+# Testing
+pytest==7.4.3
+httpx==0.25.2  # FastAPI TestClient ต้องมี httpx ติดตั้งไว้ด้วยตั้งแต่ starlette เวอร์ชันนี้

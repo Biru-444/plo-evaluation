@@ -22,6 +22,14 @@ class StudentSchema(BaseModel):
     current_year_level: int
 
 
+class EnrolledStudentSchema(StudentSchema):
+    """StudentSchema + clo_mastery_percent (0-100) - เฉพาะ GET /courses/{course_id}/enrolled-students
+    เมื่อมี query param plo_id ส่งมา (ดู courses.py) เป็น None เสมอเมื่อไม่ได้ส่ง plo_id หรือเมื่อวิชานี้
+    ไม่มี CLO ผูกกับ PLO ข้อนั้นเลย/นักศึกษาคนนี้ยังไม่มีคะแนนให้ CLO ไหนของวิชานี้เลย"""
+
+    clo_mastery_percent: float | None = None
+
+
 class StudentCreateSchema(BaseModel):
     """`id` (student code) has no DB default/sequence, so unlike other
     create schemas it must be supplied by the client rather than omitted."""

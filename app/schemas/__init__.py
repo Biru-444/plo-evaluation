@@ -20,7 +20,7 @@ from .course_offering import (
     CourseOfferingCreateSchema,
     CourseOfferingUpdateSchema,
 )
-from .student import StudentSchema, StudentCreateSchema, StudentUpdateSchema
+from .student import StudentSchema, StudentCreateSchema, StudentUpdateSchema, EnrolledStudentSchema
 from .enrollment import (
     EnrollmentSchema,
     EnrollmentCreateSchema,
@@ -80,6 +80,7 @@ __all__ = [
     "StudentSchema",
     "StudentCreateSchema",
     "StudentUpdateSchema",
+    "EnrolledStudentSchema",
     "EnrollmentSchema",
     "EnrollmentCreateSchema",
     "EnrollmentUpdateSchema",
