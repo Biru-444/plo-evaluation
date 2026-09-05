@@ -278,7 +278,11 @@ def get_ylo_achievement(
                 is_achieved=achieved,
             )
         )
-    student_items.sort(key=lambda s: (s.student_name, s.student_id))
+    # เรียงตามรหัสนักศึกษาจากน้อยไปมาก ไม่ใช่ตามชื่อ - ผู้เรียก endpoint นี้ไม่ควรต้องมา sort ซ้ำเองอีกที
+    # ใช้ string sort ตรงๆ (ไม่ int()) เพราะรหัสจริงในระบบเป็นตัวเลขความยาวคงที่เสมอ (เช่น
+    # "660112230027") ทำให้ string sort ให้ผลเหมือน numeric sort ทุกประการ และไม่พังกับรหัสทดสอบที่ไม่ใช่
+    # ตัวเลขล้วน (เช่น "TEST001" ที่ใช้ในเทสอื่นของระบบนี้ - int("TEST001") จะ raise ValueError ทันที)
+    student_items.sort(key=lambda s: s.student_id)
 
     achieved_rate_percent = (
         Decimal(achieved_count) / Decimal(total_students) * Decimal(100)
