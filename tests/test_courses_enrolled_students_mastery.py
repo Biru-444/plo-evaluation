@@ -366,6 +366,58 @@ def test_invalid_course_id_still_returns_404(client, db_session):
     assert resp2.status_code == 404
 
 
+def test_offering_id_is_included_in_response(client, db_session):
+    """response ต้องมี offering_id ของ course_offering ที่นักศึกษาลงทะเบียนอยู่ (ใช้ต่อยอดเรียก
+    GET /clo-achievement?offering_id=... จากฝั่ง frontend)"""
+    fx = _make_base_fixtures(db_session)
+    _enroll_student(
+        db_session,
+        curriculum_id=fx["curriculum"].id,
+        offering_id=fx["offering"].id,
+        student_id="TEST001",
+    )
+    db_session.commit()
+
+    resp = client.get(f"/courses/{fx['course'].id}/enrolled-students")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["offering_id"] == fx["offering"].id
+
+
+def test_offering_id_picks_latest_enrollment_when_multiple_offerings(client, db_session):
+    """ถ้านักศึกษาคนเดียวลงทะเบียนวิชานี้มากกว่า 1 course_offering (เช่น ลงเรียนซ้ำคนละเทอม) ต้อง
+    ได้ offering_id ของ enrollment ล่าสุด (Enrollment.id มากสุด) มา ไม่ error/ไม่สุ่มเลือก - จำลองด้วย
+    การสร้าง offering ที่สองแล้ว enroll เข้า offering แรกก่อน (Enrollment.id น้อยกว่า) แล้วค่อย enroll
+    เข้า offering ที่สอง (Enrollment.id มากกว่า)"""
+    fx = _make_base_fixtures(db_session)
+    second_offering = CourseOffering(
+        course_id=fx["course"].id, academic_year=2570, semester=1, section="1"
+    )
+    db_session.add(second_offering)
+    db_session.flush()
+
+    student = Student(
+        id="TEST001",
+        curriculum_id=fx["curriculum"].id,
+        first_name="ทดสอบ",
+        last_name="ลงซ้ำ",
+        cohort_year=69,
+        current_year_level=1,
+    )
+    db_session.add(student)
+    db_session.add(Enrollment(student_id=student.id, offering_id=fx["offering"].id))
+    db_session.flush()
+    db_session.add(Enrollment(student_id=student.id, offering_id=second_offering.id))
+    db_session.flush()
+    db_session.commit()
+
+    resp = client.get(f"/courses/{fx['course'].id}/enrolled-students")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["offering_id"] == second_offering.id
+
+
 def test_batch_query_count_does_not_scale_per_student(client, db_session, admin_user):
     """ยืนยันว่าคำนวณแบบ batch จริง (จำนวน SQL query คงที่ ไม่ขึ้นกับจำนวนนักศึกษาใน roster) - นับจำนวน
     query ระหว่างเรียก endpoint ด้วย SQLAlchemy event, roster 5 คนต้อง query จำนวนเท่าเดิมไม่ใช่ 5 เท่า"""
