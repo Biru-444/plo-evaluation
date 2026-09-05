@@ -554,9 +554,9 @@ def get_cohort_plo_achievement(
         _calculate_plo_achievement_for_student(db, student, plo_requirements, clo_pass_thresholds)
         for student in students
     ]
-    students_sorted = sorted(
-        student_achievements, key=lambda sa: (sa.student_name, sa.student_id)
-    )
+    # เรียงตามรหัสนักศึกษาจากน้อยไปมาก ไม่ใช่ตามชื่อ (string sort ตรงๆ ไม่ int() - ดูเหตุผลเดียวกับ
+    # ylo_calculation.py คือรหัสจริงยาวคงที่อยู่แล้ว แต่รหัสทดสอบในระบบนี้ไม่ใช่ตัวเลขล้วนเสมอไป)
+    students_sorted = sorted(student_achievements, key=lambda sa: sa.student_id)
 
     total_students = len(students)
     percent_sum_by_plo, count_with_data_by_plo, achieved_count_by_plo = _aggregate_plo_percent_stats(
@@ -706,9 +706,9 @@ def get_plo_achievement_by_year(
             )
             for student in students
         ]
-        students_sorted = sorted(
-            student_achievements, key=lambda sa: (sa.student_name, sa.student_id)
-        )
+        # เรียงตามรหัสนักศึกษาจากน้อยไปมาก ไม่ใช่ตามชื่อ (เดียวกับ /achievement/cohort ด้านบน) แม้
+        # field students ของ endpoint นี้จะยังไม่ถูก render ที่ไหนใน UI ตอนนี้ก็ตาม
+        students_sorted = sorted(student_achievements, key=lambda sa: sa.student_id)
 
         percent_sum_by_plo, count_with_data_by_plo, achieved_count_by_plo = _aggregate_plo_percent_stats(
             student_achievements
