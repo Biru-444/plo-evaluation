@@ -26,9 +26,6 @@ class PLO(Base):
     course_mappings: Mapped[list["CoursePLO"]] = relationship(
         back_populates="plo", cascade="all, delete-orphan"
     )
-    clo_mappings: Mapped[list["CLOPLOMapping"]] = relationship(
-        back_populates="plo", cascade="all, delete-orphan"
-    )
 
     def __repr__(self) -> str:
         return f"<PLO id={self.id} code={self.code!r}>"

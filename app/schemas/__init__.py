@@ -7,7 +7,6 @@ from .plo import (
     PLOSchema,
     PLOCreateSchema,
     PLOUpdateSchema,
-    PLOLinkedCourseSchema,
     PLOCoursePlanItemSchema,
 )
 from .ylo import YLOSchema, YLOCreateSchema, YLOUpdateSchema
@@ -34,11 +33,6 @@ from .enrollment import (
     RecommendedOfferingSchema,
 )
 from .clo import CLOSchema, CLOCreateSchema, CLOUpdateSchema
-from .clo_plo_mapping import (
-    CLOPLOMappingSchema,
-    CLOPLOMappingCreateSchema,
-    CLOPLOMappingUpdateSchema,
-)
 from .assessment import (
     AssessmentItemSchema,
     AssessmentCreateSchema,
@@ -93,9 +87,6 @@ __all__ = [
     "CLOSchema",
     "CLOCreateSchema",
     "CLOUpdateSchema",
-    "CLOPLOMappingSchema",
-    "CLOPLOMappingCreateSchema",
-    "CLOPLOMappingUpdateSchema",
     "AssessmentItemSchema",
     "AssessmentCreateSchema",
     "AssessmentItemUpdateSchema",

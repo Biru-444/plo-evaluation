@@ -13,7 +13,6 @@ from .course_offering import CourseOffering
 from .student import Student
 from .enrollment import Enrollment
 from .clo import CLO
-from .clo_plo_mapping import CLOPLOMapping
 from .assessment import AssessmentItem, ItemCLO
 from .student_score import StudentScore
 
@@ -30,7 +29,6 @@ __all__ = [
     "Student",
     "Enrollment",
     "CLO",
-    "CLOPLOMapping",
     "AssessmentItem",
     "ItemCLO",
     "StudentScore",

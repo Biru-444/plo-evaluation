@@ -10,7 +10,6 @@ from app.routes import (
     auth,
     clo,
     clo_calculation,
-    clo_plo_mapping,
     course_offering,
     course_plo,
     courses,
@@ -84,7 +83,6 @@ app.include_router(course_offering.router)
 app.include_router(students.router)
 app.include_router(enrollment.router)
 app.include_router(clo.router)
-app.include_router(clo_plo_mapping.router)
 app.include_router(assessment.router)
 app.include_router(item_clo.router)
 app.include_router(roster_import.router)

@@ -9,16 +9,17 @@ duplicated or modified) since "passes a CLO" is defined identically everywhere.
 Calculation (confirmed spec):
   A student achieves YLO year N of a curriculum only if they pass EVERY course
   that satisfies BOTH conditions at once:
-    (a) the course has a CLO mapped (via clo_plo_mapping) to any PLO that this
-        YLO is mapped to (via ylo_plo_mapping - a YLO is usually mapped to
-        several PLOs, this is a union across all of them, not just one)
+    (a) the course is marked responsibility_level='primary' in course_plo for
+        any PLO that this YLO is mapped to (via ylo_plo_mapping - a YLO is
+        usually mapped to several PLOs, this is a union across all of them,
+        not just one) - EVERY CLO belonging to that course counts, no
+        per-CLO opt-in/weighting
     (b) the course is scheduled for year_level N in study_plan, for the same
         curriculum (courses from other years that happen to share a PLO with
         this YLO are excluded - condition (b) is what keeps them out)
-  "Passes a course" (for this YLO) = every one of that course's CLOs that maps
-  to *any* PLO in this YLO's PLO group passes its own pass_threshold_percent
-  (same per-CLO pass/fail rule as the PLO work - CLOs of the same course that
-  don't map to any PLO in this group are irrelevant and excluded).
+  "Passes a course" (for this YLO) = every one of that course's CLOs passes
+  its own pass_threshold_percent (same per-CLO pass/fail rule as the PLO
+  work).
   A YLO with zero qualifying courses (no PLO mapped, or no study_plan course
   for that year matches any of those PLOs) is reported as not achieved - no
   data to judge from, not an automatic pass. Same rule as the PLO work.
@@ -35,7 +36,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     CLO,
-    CLOPLOMapping,
+    CoursePLO,
     Curriculum,
     Enrollment,
     AssessmentItem,
@@ -106,11 +107,12 @@ def _study_plan_course_ids(
 def _build_ylo_requirements(
     db: Session, ylo: YLO, cohort_year: int | None
 ) -> dict[int, set[int]]:
-    """course_id -> set of that course's CLO ids that map to any PLO in this
-    YLO's PLO group AND belong to a course scheduled for this YLO's year_level.
-    Both condition (a) (PLO group membership) and (b) (year match) are applied
-    here together, so a course from a different year never leaks in even if it
-    shares a PLO with this YLO."""
+    """course_id -> set of ALL of that course's CLO ids, for every course that
+    is marked responsibility_level='primary' (course_plo) for any PLO in this
+    YLO's PLO group AND belongs to a course scheduled for this YLO's
+    year_level. Both condition (a) (PLO group membership) and (b) (year match)
+    are applied here together, so a course from a different year never leaks
+    in even if it shares a PLO with this YLO."""
     plo_ids = {
         row[0]
         for row in db.query(YLOPLOMapping.plo_id).filter(YLOPLOMapping.ylo_id == ylo.id).all()
@@ -122,12 +124,20 @@ def _build_ylo_requirements(
     if not course_ids_this_year:
         return {}
 
-    rows = (
-        db.query(CLOPLOMapping.clo_id, CLO.course_id)
-        .join(CLO, CLO.id == CLOPLOMapping.clo_id)
-        .filter(CLOPLOMapping.plo_id.in_(plo_ids), CLO.course_id.in_(course_ids_this_year))
+    primary_course_ids = {
+        row[0]
+        for row in db.query(CoursePLO.course_id)
+        .filter(
+            CoursePLO.plo_id.in_(plo_ids),
+            CoursePLO.responsibility_level == "primary",
+            CoursePLO.course_id.in_(course_ids_this_year),
+        )
         .all()
-    )
+    }
+    if not primary_course_ids:
+        return {}
+
+    rows = db.query(CLO.id, CLO.course_id).filter(CLO.course_id.in_(primary_course_ids)).all()
     requirements: dict[int, set[int]] = {}
     for clo_id, course_id in rows:
         requirements.setdefault(course_id, set()).add(clo_id)
