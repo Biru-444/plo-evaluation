@@ -8,12 +8,14 @@ Calculation (all-or-nothing, confirmed spec - not a continuous blended average):
      for at all has no mastery value.
   2. A CLO "passes" only if its mastery >= that CLO's own pass_threshold_percent
      (per-CLO, not a global constant). No mastery value = does not pass.
-  3. For a given PLO, every course that has at least one CLO mapped to it (via
-     clo_plo_mapping) is "required" for that PLO. A student "passes a required
-     course for this PLO" only if ALL of that course's CLOs mapped to this PLO
-     pass (CLOs of the same course mapped to a *different* PLO are irrelevant
-     here) - courses are found globally from clo_plo_mapping, independent of
-     whether the student is even enrolled in them.
+  3. For a given PLO, every course marked responsibility_level='primary' for it
+     in course_plo (curriculum-design mapping, มคอ.2) is "required" for that
+     PLO - EVERY CLO belonging to that course counts toward it equally (no
+     per-CLO opt-in/weighting - all of a primary course's CLOs are assumed
+     relevant to every PLO it's marked primary for). A student "passes a
+     required course for this PLO" only if ALL of that course's CLOs pass -
+     courses are found globally from course_plo, independent of whether the
+     student is even enrolled in them.
   4. A student achieves a PLO only if they pass EVERY required course for it.
      A PLO with zero required courses is reported as not achieved (no data to
      judge from, not an automatic pass).
@@ -32,7 +34,6 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     CLO,
-    CLOPLOMapping,
     Course,
     CourseOffering,
     CoursePLO,
@@ -131,26 +132,19 @@ def _build_plo_requirements(
 ) -> tuple[dict[int, dict[int, set[int]]], dict[int, Decimal]]:
     """Per curriculum (not per student - compute once and reuse across every
     student in a cohort, not once per student):
-      - plo_requirements[plo_id][course_id] = the set of that course's CLO ids
-        that map to that specific PLO (CLOs of the same course mapped to a
-        *different* PLO are excluded from that set).
+      - plo_requirements[plo_id][course_id] = the set of ALL of that course's
+        CLO ids (every CLO on a course_plo(primary) course counts equally
+        toward that PLO - there is no per-CLO opt-in/weighting anymore).
       - clo_pass_thresholds[clo_id] = that CLO's own pass_threshold_percent.
-    A course only appears under a PLO here if BOTH: (a) course_plo marks it
-    responsibility_level='primary' for that PLO (curriculum-design mapping),
-    AND (b) it has at least one CLO actually mapped to that PLO via
-    clo_plo_mapping (what an instructor bound while teaching). A course that's
-    only 'secondary', or has no course_plo entry at all for this PLO, is not
-    required - even if clo_plo_mapping links it (e.g. a co-op/สหกิจศึกษา course
-    marked secondary still isn't forced to pass).
+    A course only appears under a PLO here if course_plo marks it
+    responsibility_level='primary' for that PLO (curriculum-design mapping,
+    มคอ.2). A course that's only 'secondary', or has no course_plo entry at
+    all for this PLO, is not required.
     """
     rows = (
-        db.query(CLOPLOMapping.plo_id, CLO.course_id, CLOPLOMapping.clo_id, CLO.pass_threshold_percent)
-        .join(CLO, CLO.id == CLOPLOMapping.clo_id)
-        .join(Course, Course.id == CLO.course_id)
-        .join(
-            CoursePLO,
-            (CoursePLO.course_id == CLO.course_id) & (CoursePLO.plo_id == CLOPLOMapping.plo_id),
-        )
+        db.query(CoursePLO.plo_id, CLO.course_id, CLO.id, CLO.pass_threshold_percent)
+        .join(Course, Course.id == CoursePLO.course_id)
+        .join(CLO, CLO.course_id == CoursePLO.course_id)
         .filter(Course.curriculum_id == curriculum_id, CoursePLO.responsibility_level == "primary")
         .all()
     )
@@ -165,9 +159,9 @@ def _build_plo_requirements(
 def _qualifying_plo_ids(plo_requirements: dict[int, dict[int, set[int]]]) -> set[int]:
     """PLO ที่มีวิชา "หลัก" อย่างน้อย 1 วิชาผ่านเกณฑ์การคำนวณ (คือมี key อยู่ใน plo_requirements เลย -
     _build_plo_requirements ใส่ key เฉพาะ plo_id ที่เจอวิชาที่เข้าเงื่อนไขจริงเท่านั้น) ใช้ตัดสินว่า
-    PLO ข้อไหนควรถูกนับเป็นส่วนหนึ่งของ "บรรลุ PLO ครบทุกข้อ" - dynamic ตามข้อมูล course_plo/
-    clo_plo_mapping จริงเสมอ ไม่ hardcode รายชื่อ PLO ที่ตัดออก ถ้าข้อมูลเปลี่ยน (เช่นมีคนเติม course_plo
-    ให้ PLO ที่เคยไม่มีวิชาเลย) ผลลัพธ์จะเปลี่ยนตามอัตโนมัติโดยไม่ต้องแก้โค้ด"""
+    PLO ข้อไหนควรถูกนับเป็นส่วนหนึ่งของ "บรรลุ PLO ครบทุกข้อ" - dynamic ตามข้อมูล course_plo จริงเสมอ
+    ไม่ hardcode รายชื่อ PLO ที่ตัดออก ถ้าข้อมูลเปลี่ยน (เช่นมีคนเติม course_plo ให้ PLO ที่เคยไม่มีวิชา
+    เลย) ผลลัพธ์จะเปลี่ยนตามอัตโนมัติโดยไม่ต้องแก้โค้ด"""
     return {plo_id for plo_id, courses in plo_requirements.items() if courses}
 
 
@@ -190,8 +184,8 @@ def _student_passed_course_for_plo(
     course_clo_ids: set[int], clo_mastery: dict[int, Decimal], clo_pass_thresholds: dict[int, Decimal]
 ) -> bool:
     """"Passed this course for this PLO" only if every one of that course's
-    CLOs mapped to this PLO passes (see docstring on _build_plo_requirements
-    for why course_clo_ids is already filtered to just this PLO's CLOs)."""
+    CLOs passes (see docstring on _build_plo_requirements for why
+    course_clo_ids is already the full set of that course's CLOs)."""
     return all(_clo_passed(clo_id, clo_mastery, clo_pass_thresholds) for clo_id in course_clo_ids)
 
 
@@ -201,7 +195,7 @@ def _student_achieved_plo(
     clo_pass_thresholds: dict[int, Decimal],
 ) -> bool:
     """Achieves the PLO only if every course required for it (globally, from
-    clo_plo_mapping) is passed. Zero required courses = not achieved (nothing
+    course_plo) is passed. Zero required courses = not achieved (nothing
     to judge from, not an automatic pass)."""
     if not courses_for_plo:
         return False
@@ -459,9 +453,10 @@ def get_student_plo_course_breakdown(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """วิชาทั้งหมดที่เกี่ยวข้องกับ PLO ข้อนี้ (จาก clo_plo_mapping) พร้อมสถานะผ่าน/ไม่ผ่านของนักศึกษา
-    คนนี้โดยเฉพาะต่อวิชา - เรียก _build_plo_requirements และ _student_passed_course_for_plo ตัวเดียวกับ
-    ที่ตัดสิน "% บรรลุ PLO" ทุกที่ในไฟล์นี้ ไม่มี logic คำนวณแยกที่อาจ drift ไม่ตรงกัน"""
+    """วิชาทั้งหมดที่เกี่ยวข้องกับ PLO ข้อนี้ (จาก course_plo responsibility_level='primary') พร้อม
+    สถานะผ่าน/ไม่ผ่านของนักศึกษาคนนี้โดยเฉพาะต่อวิชา - เรียก _build_plo_requirements และ
+    _student_passed_course_for_plo ตัวเดียวกับที่ตัดสิน "% บรรลุ PLO" ทุกที่ในไฟล์นี้ ไม่มี logic
+    คำนวณแยกที่อาจ drift ไม่ตรงกัน"""
     plo = db.get(PLO, plo_id)
     if plo is None:
         raise HTTPException(status_code=404, detail="PLO not found")

@@ -28,9 +28,6 @@ class CLO(Base):
 
     course: Mapped["Course"] = relationship(back_populates="clos")
     creator: Mapped["User"] = relationship(back_populates="created_clos", foreign_keys=[created_by])
-    plo_mappings: Mapped[list["CLOPLOMapping"]] = relationship(
-        back_populates="clo", cascade="all, delete-orphan"
-    )
     item_mappings: Mapped[list["ItemCLO"]] = relationship(
         back_populates="clo", cascade="all, delete-orphan"
     )

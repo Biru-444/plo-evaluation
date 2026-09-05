@@ -121,5 +121,5 @@ def delete_clo(
         )
         if owns_course is None:
             raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
-    db.delete(clo)  # cascade ลบ clo_plo_mapping / item_clo ที่อ้างถึงด้วย
+    db.delete(clo)  # cascade ลบ item_clo ที่อ้างถึงด้วย
     db.commit()
