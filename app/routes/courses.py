@@ -102,6 +102,30 @@ def get_course_enrolled_students(
 
     students = query.order_by(Student.first_name, Student.last_name).all()
 
+    # offering_id ของแต่ละคน (ให้ frontend รู้ว่าจะเรียก /clo-achievement?offering_id=... ของ offering
+    # ไหนต่อ) - roster query ด้านบนใช้ .distinct() บนคอลัมน์ Student ล้วนๆ เจตนา ไม่ต้องการให้นักศึกษา
+    # คนเดียวโผล่ซ้ำถ้าลงทะเบียนวิชานี้มากกว่า 1 course_offering จึงต้อง query แยกต่างหากเพื่อ resolve
+    # offering_id ต่อคน - เลือก enrollment ล่าสุด (Enrollment.id มากสุด) ถ้ามีมากกว่า 1 offering ต่อคน
+    # (ยืนยันจากข้อมูลจริงแล้วว่าปัจจุบันไม่มีเคสนี้เลยสักคนในระบบ - ถ้าในอนาคตพบว่ามีการลงทะเบียนซ้ำ
+    # offering ของวิชาเดียวกันจริง (เช่น ลงเรียนซ้ำคนละเทอมหลังตก) ต้องกลับมาทบทวนใหม่ว่า "ล่าสุด" ยังเป็น
+    # คำตอบที่ถูกต้องเสมอไปหรือไม่ - อาจต้องให้ผู้ใช้เลือก offering เองแทน)
+    offering_id_by_student: dict[str, int] = {}
+    if students:
+        enrollment_rows = (
+            db.query(Enrollment.student_id, Enrollment.offering_id, Enrollment.id)
+            .join(CourseOffering, CourseOffering.id == Enrollment.offering_id)
+            .filter(
+                CourseOffering.course_id == course_id,
+                Enrollment.student_id.in_([s.id for s in students]),
+            )
+            .all()
+        )
+        latest_enrollment_id_by_student: dict[str, int] = {}
+        for student_id, offering_id, enrollment_id in enrollment_rows:
+            if enrollment_id > latest_enrollment_id_by_student.get(student_id, -1):
+                latest_enrollment_id_by_student[student_id] = enrollment_id
+                offering_id_by_student[student_id] = offering_id
+
     plo_achieved_by_student_id: dict[str, bool | None] = {}
     if plo_id is not None and students:
         plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, course.curriculum_id)
@@ -130,6 +154,7 @@ def get_course_enrolled_students(
     return [
         EnrolledStudentSchema(
             **StudentSchema.model_validate(s).model_dump(),
+            offering_id=offering_id_by_student[s.id],
             plo_achieved=plo_achieved_by_student_id.get(s.id) if plo_id is not None else None,
         )
         for s in students
