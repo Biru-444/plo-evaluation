@@ -235,7 +235,12 @@ def get_ylo_achievement(
         }
     )
 
-    students_query = db.query(Student).filter(Student.curriculum_id == curriculum_id)
+    # เฉพาะนักศึกษาที่เรียนถึงชั้นปีนี้แล้ว (current_year_level >= year_level ที่ขอ) - ปีนี้ยังไม่ถึง
+    # แปลว่ายังไม่มีโอกาสได้เรียน/สอบวิชาที่กำหนด YLO ปีนี้เลย จึงไม่ควรถูกนับเป็น "ไม่บรรลุ" ปนเข้ามา
+    students_query = db.query(Student).filter(
+        Student.curriculum_id == curriculum_id,
+        Student.current_year_level >= year_level,
+    )
     if cohort_year is not None:
         students_query = students_query.filter(Student.cohort_year == cohort_year)
     students = students_query.all()
