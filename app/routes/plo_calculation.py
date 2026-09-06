@@ -339,24 +339,23 @@ def _clo_mastery_for_students_batch(
     return result
 
 
-def _calculate_plo_achievement_for_student(
-    db: Session,
+def _calculate_plo_achievement_from_mastery(
     student: Student,
+    plos: list[PLO],
+    clo_mastery: dict[int, Decimal],
     plo_requirements: dict[int, dict[int, set[int]]],
     clo_pass_thresholds: dict[int, Decimal],
-    course_id_filter: set[int] | None = None,
 ) -> StudentPLOAchievement:
-    plos = (
-        db.query(PLO)
-        .filter(PLO.curriculum_id == student.curriculum_id)
-        .order_by(PLO.code)
-        .all()
-    )
-
-    clo_mastery = _clo_mastery_for_student(db, student.id, course_id_filter)
-
-    # PLO achievement: all-or-nothing across every required course (see
-    # _student_achieved_plo) - not a blended average of CLO masteries.
+    """Pure computation, no DB access - shares the PLO list and pass-thresholds
+    (curriculum-wide, identical for every student) and takes this student's
+    already-fetched clo_mastery, so a cohort/by-year call can fetch `plos`
+    once and mastery for every student in one batched query instead of
+    re-querying both per student (see GET /achievement/cohort and
+    /achievement/by-year, which used to call the old single-student version
+    of this in a per-student loop - an N+1 query pattern invisible on the
+    small seed dataset but slow enough on a real ~200-student roster to blow
+    past the frontend's request timeout, even though the backend eventually
+    finished and returned correct data)."""
     achievements = []
     for plo in plos:
         achieved = _student_achieved_plo(
@@ -377,6 +376,30 @@ def _calculate_plo_achievement_for_student(
         student_name=f"{student.first_name} {student.last_name}",
         curriculum_id=student.curriculum_id,
         plo_achievements=achievements,
+    )
+
+
+def _calculate_plo_achievement_for_student(
+    db: Session,
+    student: Student,
+    plo_requirements: dict[int, dict[int, set[int]]],
+    clo_pass_thresholds: dict[int, Decimal],
+    course_id_filter: set[int] | None = None,
+) -> StudentPLOAchievement:
+    """Single-student version - fine to query per-call here since GET
+    /plo/achievement (one student) is the only remaining caller; cohort/
+    by-year use the batched _calculate_plo_achievement_from_mastery above
+    instead, to avoid re-querying the PLO list and CLO mastery once per
+    student in the roster."""
+    plos = (
+        db.query(PLO)
+        .filter(PLO.curriculum_id == student.curriculum_id)
+        .order_by(PLO.code)
+        .all()
+    )
+    clo_mastery = _clo_mastery_for_student(db, student.id, course_id_filter)
+    return _calculate_plo_achievement_from_mastery(
+        student, plos, clo_mastery, plo_requirements, clo_pass_thresholds
     )
 
 
@@ -550,8 +573,18 @@ def get_cohort_plo_achievement(
             total_plo_count=len(plos),
         )
 
+    # Batched: one round of queries for every student's CLO mastery instead
+    # of one round PER student - a ~200-student roster otherwise means
+    # thousands of individual DB round-trips (fine on a local Postgres, slow
+    # enough over the network to a hosted DB that the frontend's request
+    # timeout fires before the response comes back, even though it eventually
+    # would have finished correctly).
+    student_ids = [student.id for student in students]
+    clo_mastery_by_student = _clo_mastery_for_students_batch(db, student_ids)
     student_achievements = [
-        _calculate_plo_achievement_for_student(db, student, plo_requirements, clo_pass_thresholds)
+        _calculate_plo_achievement_from_mastery(
+            student, plos, clo_mastery_by_student.get(student.id, {}), plo_requirements, clo_pass_thresholds
+        )
         for student in students
     ]
     # เรียงตามรหัสนักศึกษาจากน้อยไปมาก ไม่ใช่ตามชื่อ (string sort ตรงๆ ไม่ int() - ดูเหตุผลเดียวกับ
@@ -645,6 +678,7 @@ def get_plo_achievement_by_year(
         students_query = students_query.filter(Student.cohort_year == cohort_year)
     students = students_query.all()
     total_students = len(students)
+    student_ids = [student.id for student in students]
 
     ylo_by_year = {
         ylo.year_level: ylo
@@ -700,9 +734,15 @@ def get_plo_achievement_by_year(
             )
             continue
 
+        # Batched per year, same reasoning as /achievement/cohort above - one
+        # round of mastery queries for the whole roster instead of one round
+        # per student, times 4 years.
+        clo_mastery_by_student = _clo_mastery_for_students_batch(
+            db, student_ids, course_id_filter=course_ids
+        )
         student_achievements = [
-            _calculate_plo_achievement_for_student(
-                db, student, plo_requirements, clo_pass_thresholds, course_id_filter=course_ids
+            _calculate_plo_achievement_from_mastery(
+                student, plos, clo_mastery_by_student.get(student.id, {}), plo_requirements, clo_pass_thresholds
             )
             for student in students
         ]
