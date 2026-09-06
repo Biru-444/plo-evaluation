@@ -2,6 +2,8 @@
 FastAPI Main Application
 PLO Evaluation System - Backend
 """
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
@@ -37,10 +39,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Add CORS middleware for React frontend
+# Add CORS middleware for React frontend - อ่านจาก env var ALLOWED_ORIGINS (คั่นด้วย comma) เพื่อ
+# ให้ตั้งค่า origin ของ frontend ที่ deploy จริง (เช่น Vercel) ได้โดยไม่ต้องแก้โค้ด ถ้าไม่ได้ตั้งค่าไว้
+# (เช่นตอน dev local) จะ fallback ไปใช้ localhost เดิมเหมือนก่อนหน้านี้
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+ALLOWED_ORIGINS = (
+    [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
+    if _allowed_origins_env
+    else ["http://localhost:3000", "http://localhost:8080"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8080"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
