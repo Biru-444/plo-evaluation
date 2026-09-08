@@ -36,6 +36,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     CLO,
+    Course,
     CoursePLO,
     Curriculum,
     Enrollment,
@@ -59,6 +60,15 @@ class YLOAchievementStudentItem(BaseModel):
     is_achieved: bool
 
 
+class YLOCourseInfo(BaseModel):
+    course_id: int
+    course_code: str
+    name_th: str
+    name_en: str | None
+    credit: int
+    category: str | None
+
+
 class YLOCohortAchievement(BaseModel):
     ylo_id: int
     curriculum_id: int
@@ -70,6 +80,10 @@ class YLOCohortAchievement(BaseModel):
     achieved_rate_percent: float
     students: list[YLOAchievementStudentItem]
     available_cohort_years: list[int] = []
+    # รายวิชาที่เปิดสอนชั้นปีนี้ตามแผนการศึกษา (study_plan) - ทุกวิชาที่กำหนดไว้ ไม่ใช่แค่วิชาที่ถูกใช้
+    # คำนวณ YLO นี้ (ดู _build_ylo_requirements ที่กรองเฉพาะวิชา responsibility_level='primary' ต่อ PLO
+    # กลุ่มนี้) - จุดประสงค์ต่างกัน: อันนี้ตอบ "ปีนี้เรียนอะไรบ้าง" ไม่ใช่ "อะไรที่ใช้ตัดสิน YLO"
+    courses: list[YLOCourseInfo] = []
 
 
 def _study_plan_course_ids(
@@ -102,6 +116,28 @@ def _study_plan_course_ids(
         )
         .all()
     }
+
+
+def _year_courses(db: Session, curriculum_id: int, year_level: int, cohort_year: int | None) -> list[YLOCourseInfo]:
+    """All courses scheduled for this year_level per study_plan, sorted by
+    course_code - "what's taught this year", independent of which of them
+    happen to feed into this particular YLO's PLO group (see the docstring
+    on the `courses` field)."""
+    course_ids = _study_plan_course_ids(db, curriculum_id, year_level, cohort_year)
+    if not course_ids:
+        return []
+    courses = db.query(Course).filter(Course.id.in_(course_ids)).order_by(Course.course_code).all()
+    return [
+        YLOCourseInfo(
+            course_id=c.id,
+            course_code=c.course_code,
+            name_th=c.name_th,
+            name_en=c.name_en,
+            credit=c.credit,
+            category=c.category,
+        )
+        for c in courses
+    ]
 
 
 def _build_ylo_requirements(
@@ -245,6 +281,7 @@ def get_ylo_achievement(
         students_query = students_query.filter(Student.cohort_year == cohort_year)
     students = students_query.all()
     total_students = len(students)
+    courses = _year_courses(db, curriculum_id, year_level, cohort_year)
 
     if ylo is None or total_students == 0:
         return YLOCohortAchievement(
@@ -258,6 +295,7 @@ def get_ylo_achievement(
             achieved_rate_percent=0.0,
             students=[],
             available_cohort_years=available_cohort_years,
+            courses=courses,
         )
 
     requirements = _build_ylo_requirements(db, ylo, cohort_year)
@@ -298,5 +336,6 @@ def get_ylo_achievement(
         achieved_student_count=achieved_count,
         achieved_rate_percent=float(achieved_rate_percent),
         students=student_items,
+        courses=courses,
         available_cohort_years=available_cohort_years,
     )
