@@ -55,6 +55,11 @@ class BulkEnrollByCohortResult(BaseModel):
     already_in_other_section: list[OtherSectionConflict] = []
 
 
+class BulkRemoveByCohortResult(BaseModel):
+    removed_count: int
+    removed_students: list[EnrolledStudentBrief]
+
+
 class BulkEnrollResult(BaseModel):
     added_count: int
     already_enrolled: list[str]

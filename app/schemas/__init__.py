@@ -29,6 +29,7 @@ from .enrollment import (
     EnrolledStudentBrief,
     OtherSectionConflict,
     BulkEnrollByCohortResult,
+    BulkRemoveByCohortResult,
     BulkEnrollResult,
     RecommendedOfferingSchema,
 )
@@ -83,6 +84,7 @@ __all__ = [
     "EnrolledStudentBrief",
     "OtherSectionConflict",
     "BulkEnrollByCohortResult",
+    "BulkRemoveByCohortResult",
     "BulkEnrollResult",
     "CLOSchema",
     "CLOCreateSchema",

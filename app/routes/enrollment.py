@@ -18,6 +18,7 @@ from app.schemas import (
     BulkEnrollByCohortSchema,
     BulkEnrollResult,
     BulkEnrollSchema,
+    BulkRemoveByCohortResult,
     EnrolledStudentBrief,
     EnrollmentCreateSchema,
     EnrollmentSchema,
@@ -359,6 +360,38 @@ def bulk_enroll_by_cohort(
             for sid, section in sorted(other_section_map.items())
         ],
     )
+
+
+@router.post("/bulk-by-cohort-delete", response_model=BulkRemoveByCohortResult)
+def bulk_remove_by_cohort(
+    payload: BulkEnrollByCohortSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    offering = _require_offering_ownership(db, payload.offering_id, current_user)
+    course = db.get(Course, offering.course_id)
+
+    matches = (
+        db.query(Enrollment, Student)
+        .join(Student, Student.id == Enrollment.student_id)
+        .filter(
+            Enrollment.offering_id == payload.offering_id,
+            Student.cohort_year == payload.cohort_year,
+            Student.curriculum_id == course.curriculum_id,
+        )
+        .order_by(Student.id)
+        .all()
+    )
+
+    removed_students = [
+        EnrolledStudentBrief(id=student.id, first_name=student.first_name, last_name=student.last_name)
+        for _, student in matches
+    ]
+    for enrollment, _ in matches:
+        db.delete(enrollment)
+    db.commit()
+
+    return BulkRemoveByCohortResult(removed_count=len(matches), removed_students=removed_students)
 
 
 @router.post("/bulk", response_model=BulkEnrollResult)
