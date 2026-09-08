@@ -1,7 +1,10 @@
 """API routes for ItemCLO"""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,6 +14,15 @@ from app.models import AssessmentItem, CourseOffering, ItemCLO, User
 from app.schemas import ItemCLOCreateSchema, ItemCLOSchema, ItemCLOUpdateSchema
 
 router = APIRouter(prefix="/item-clo", tags=["Item-CLO Mapping"])
+
+
+def _other_mappings_weight_sum(db: Session, clo_id: int, exclude_item_clo_id: int | None = None) -> Decimal:
+    """Sum of weight_percent already mapped to this CLO, across all assessment
+    items - used to keep each CLO's total mapped weight at or under 100%."""
+    query = db.query(func.coalesce(func.sum(ItemCLO.weight_percent), 0)).filter(ItemCLO.clo_id == clo_id)
+    if exclude_item_clo_id is not None:
+        query = query.filter(ItemCLO.id != exclude_item_clo_id)
+    return query.scalar()
 
 
 @router.get("", response_model=list[ItemCLOSchema])
@@ -49,6 +61,17 @@ def create_item_clo(
         if offering is None or offering.instructor_id != current_user.id:
             raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
 
+    existing_total = _other_mappings_weight_sum(db, payload.clo_id)
+    new_total = existing_total + payload.weight_percent
+    if new_total > 100:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"น้ำหนักรวมของ CLO นี้จะเกิน 100% "
+                f"(มีอยู่แล้ว {existing_total}% + ที่จะเพิ่ม {payload.weight_percent}% = {new_total}%)"
+            ),
+        )
+
     item_clo = ItemCLO(**payload.model_dump())
     db.add(item_clo)
     try:
@@ -76,7 +99,20 @@ def update_item_clo(
     if current_user.role != "admin":
         if item_clo.item.offering.instructor_id != current_user.id:
             raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("weight_percent") is not None:
+        existing_total = _other_mappings_weight_sum(db, item_clo.clo_id, exclude_item_clo_id=item_clo.id)
+        new_total = existing_total + updates["weight_percent"]
+        if new_total > 100:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"น้ำหนักรวมของ CLO นี้จะเกิน 100% "
+                    f"(มีอยู่แล้ว {existing_total}% + ค่าใหม่ {updates['weight_percent']}% = {new_total}%)"
+                ),
+            )
+    for field, value in updates.items():
         setattr(item_clo, field, value)
     try:
         db.commit()
