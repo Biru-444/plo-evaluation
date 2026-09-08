@@ -37,6 +37,7 @@ from app.database import get_db
 from app.models import (
     CLO,
     Course,
+    CourseOffering,
     CoursePLO,
     Curriculum,
     Enrollment,
@@ -67,6 +68,29 @@ class YLOCourseInfo(BaseModel):
     name_en: str | None
     credit: int
     category: str | None
+
+
+class StudentYLOCourseItem(BaseModel):
+    course_id: int
+    course_code: str
+    name_th: str
+    is_enrolled: bool
+    # มีความหมายเฉพาะตอน is_enrolled=True เท่านั้น (ยังไม่ลงทะเบียน = ยังไม่มีข้อมูลตัดสิน ไม่ใช่ "ไม่ผ่าน")
+    passed: bool
+
+
+class StudentYLOYearItem(BaseModel):
+    year_level: int
+    ylo_description: str
+    is_reached: bool  # student.current_year_level >= year_level แล้วหรือยัง
+    is_achieved: bool
+    courses: list[StudentYLOCourseItem]
+
+
+class StudentYLOAchievement(BaseModel):
+    student_id: str
+    curriculum_id: int
+    years: list[StudentYLOYearItem]
 
 
 class YLOCohortAchievement(BaseModel):
@@ -338,4 +362,94 @@ def get_ylo_achievement(
         students=student_items,
         courses=courses,
         available_cohort_years=available_cohort_years,
+    )
+
+
+# ชั้นปีมี 4 ระดับเสมอตามโครงสร้างหลักสูตร (สมมติฐานเดียวกับที่หน้า YLOYearProgress.jsx ใช้)
+_STUDENT_YEAR_LEVELS = (1, 2, 3, 4)
+
+
+@router.get("/achievement/student", response_model=StudentYLOAchievement)
+def get_student_ylo_achievement(
+    student_id: str = Query(..., description="Student ID, e.g. 6500001"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """เวอร์ชันรายบุคคลของ /achievement/by-year - แทนที่จะเป็น "ปีเดียว ทุกคน" เป็น "ทุกปี คนเดียว" ใช้
+    ในหน้ารายละเอียดนักศึกษา (student-plo) สำหรับ hierarchy รายวิชา -> YLO (รายปี) -> PLO เรียก
+    _build_ylo_requirements/_student_achieved_ylo/_year_courses ชุดเดียวกับ /achievement/by-year
+    เพื่อให้ตัดสิน "บรรลุ YLO" ตรงกันทุกที่ - ผ่าน/ไม่ผ่านรายวิชา (ต่างจากที่ใช้ตัดสิน YLO ตรงที่นับ CLO
+    ทุกตัวของวิชานั้น ไม่ใช่แค่ตัวที่เกี่ยวกับ PLO กลุ่มของ YLO นี้) คำนวณแยกเป็นของตัวเอง"""
+    student = db.get(Student, student_id)
+    if student is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    ylo_by_year = {
+        y.year_level: y
+        for y in db.query(YLO).filter(YLO.curriculum_id == student.curriculum_id).all()
+    }
+    clo_mastery = _clo_mastery_for_student(db, student.id)
+    enrolled_course_ids = {
+        row[0]
+        for row in db.query(CourseOffering.course_id)
+        .join(Enrollment, Enrollment.offering_id == CourseOffering.id)
+        .filter(Enrollment.student_id == student.id)
+        .distinct()
+        .all()
+    }
+
+    years: list[StudentYLOYearItem] = []
+    for year_level in _STUDENT_YEAR_LEVELS:
+        ylo = ylo_by_year.get(year_level)
+        year_courses = _year_courses(db, student.curriculum_id, year_level, student.cohort_year)
+
+        if ylo is not None:
+            requirements = _build_ylo_requirements(db, ylo, student.cohort_year)
+            required_clo_ids = {clo_id for clo_ids in requirements.values() for clo_id in clo_ids}
+            ylo_clo_pass_thresholds = _clo_pass_thresholds(db, required_clo_ids)
+            is_achieved = _student_achieved_ylo(requirements, clo_mastery, ylo_clo_pass_thresholds)
+        else:
+            is_achieved = False
+
+        # ผ่าน/ไม่ผ่านรายวิชา = ทุก CLO ของวิชานั้น (ทั้งหมด ไม่ใช่แค่ที่เกี่ยวกับ YLO นี้) ผ่านเกณฑ์ของตัวเอง
+        course_ids_this_year = [c.course_id for c in year_courses]
+        clos_this_year = (
+            db.query(CLO).filter(CLO.course_id.in_(course_ids_this_year)).all()
+            if course_ids_this_year
+            else []
+        )
+        clo_ids_by_course: dict[int, set[int]] = {}
+        for clo in clos_this_year:
+            clo_ids_by_course.setdefault(clo.course_id, set()).add(clo.id)
+        course_clo_pass_thresholds = {c.id: c.pass_threshold_percent for c in clos_this_year}
+
+        course_items = [
+            StudentYLOCourseItem(
+                course_id=c.course_id,
+                course_code=c.course_code,
+                name_th=c.name_th,
+                is_enrolled=c.course_id in enrolled_course_ids,
+                passed=bool(clo_ids_by_course.get(c.course_id))
+                and all(
+                    _clo_passed(clo_id, clo_mastery, course_clo_pass_thresholds)
+                    for clo_id in clo_ids_by_course[c.course_id]
+                ),
+            )
+            for c in year_courses
+        ]
+
+        years.append(
+            StudentYLOYearItem(
+                year_level=year_level,
+                ylo_description=ylo.description if ylo is not None else "",
+                is_reached=student.current_year_level >= year_level,
+                is_achieved=is_achieved,
+                courses=course_items,
+            )
+        )
+
+    return StudentYLOAchievement(
+        student_id=student.id,
+        curriculum_id=student.curriculum_id,
+        years=years,
     )
