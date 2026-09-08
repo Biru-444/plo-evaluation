@@ -12,6 +12,7 @@ from app.schemas import (
     AssessmentCreateSchema,
     AssessmentItemSchema,
     AssessmentItemUpdateSchema,
+    StudentScoreCreateSchema,
     StudentScoreDetailSchema,
     StudentScoreSchema,
     StudentScoreUpdateSchema,
@@ -144,11 +145,20 @@ def list_student_scores(
 
 @router.post("/student-scores", response_model=StudentScoreSchema, status_code=201)
 def create_student_score(
-    payload: StudentScoreSchema,
+    payload: StudentScoreCreateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    score = StudentScore(**payload.model_dump(exclude={"id"}))
+    item = db.get(AssessmentItem, payload.item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Assessment item not found")
+    if payload.score_obtained > item.total_score:
+        raise HTTPException(
+            status_code=400,
+            detail=f"คะแนนที่กรอก ({payload.score_obtained}) เกินคะแนนเต็มของชิ้นงานนี้ (เต็ม {item.total_score})",
+        )
+
+    score = StudentScore(**payload.model_dump())
     db.add(score)
     try:
         db.commit()
@@ -172,6 +182,14 @@ def update_student_score(
     score = db.get(StudentScore, score_id)
     if score is None:
         raise HTTPException(status_code=404, detail="Student score not found")
+    if payload.score_obtained > score.item.total_score:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"คะแนนที่กรอก ({payload.score_obtained}) เกินคะแนนเต็มของชิ้นงานนี้ "
+                f"(เต็ม {score.item.total_score})"
+            ),
+        )
 
     score.score_obtained = payload.score_obtained
     db.commit()

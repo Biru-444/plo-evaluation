@@ -39,6 +39,7 @@ from .assessment import (
     AssessmentCreateSchema,
     AssessmentItemUpdateSchema,
     StudentScoreSchema,
+    StudentScoreCreateSchema,
     StudentScoreDetailSchema,
     StudentScoreUpdateSchema,
 )
@@ -93,6 +94,7 @@ __all__ = [
     "AssessmentCreateSchema",
     "AssessmentItemUpdateSchema",
     "StudentScoreSchema",
+    "StudentScoreCreateSchema",
     "StudentScoreDetailSchema",
     "StudentScoreUpdateSchema",
     "ItemCLOSchema",

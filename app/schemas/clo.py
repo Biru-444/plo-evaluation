@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CLOSchema(BaseModel):
@@ -26,11 +26,12 @@ class CLOCreateSchema(BaseModel):
     course_id: int
     code: str
     description: str
-    pass_threshold_percent: Decimal = Decimal("60.00")
+    # จำนวนเต็มเท่านั้น 0-100
+    pass_threshold_percent: int = Field(default=60, ge=0, le=100)
 
 
 class CLOUpdateSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     description: str | None = None
-    pass_threshold_percent: Decimal | None = None
+    pass_threshold_percent: int | None = Field(default=None, ge=0, le=100)
