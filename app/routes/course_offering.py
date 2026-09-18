@@ -1,12 +1,12 @@
 """
 ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course_offering (การเปิดสอนจริง)
-         บวก endpoint จับจอง/ปล่อยคืนวิชาสำหรับอาจารย์ (claim/release)
+         บวก endpoint จับจองวิชาสำหรับอาจารย์ (claim)
 
 เชื่อมกับ : list_course_offerings รับ filter unassigned=True เพื่อหาวิชาที่ยังไม่มีผู้สอน (ใช้ในหน้า
-            ให้อาจารย์เลือกจับจอง) — claim/release ใช้ atomic UPDATE กันปัญหาสองคนจับจองพร้อมกัน (ดู
+            ให้อาจารย์เลือกจับจอง) — claim ใช้ atomic UPDATE กันปัญหาสองคนจับจองพร้อมกัน (ดู
             docstring ของ claim_course_offering ด้านล่าง)
 
-ถ้าแก้ : create/update/delete เฉพาะ admin — claim/release เปิดให้ instructor ทำเองได้ (ไม่ต้อง admin)
+ถ้าแก้ : create/update/delete เฉพาะ admin — claim เปิดให้ instructor ทำเองได้ (ไม่ต้อง admin)
 """
 from __future__ import annotations
 
@@ -153,23 +153,4 @@ def claim_course_offering(
 
     db.commit()
     offering = db.get(CourseOffering, offering_id)
-    return offering
-
-
-@router.post("/{offering_id}/release", response_model=CourseOfferingSchema)
-def release_course_offering(
-    offering_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """ให้อาจารย์ปล่อยคืนวิชาที่ตัวเองจับจองไว้ (กลับไปเป็น instructor_id = NULL ให้คนอื่นจับจองต่อได้)
-    แอดมินก็ปล่อยคืนแทนใครก็ได้เหมือนกัน (เผื่อกรณีอาจารย์ลาออก/ย้ายวิชา)"""
-    offering = db.get(CourseOffering, offering_id)
-    if offering is None:
-        raise HTTPException(status_code=404, detail="ไม่พบวิชาที่เปิดสอนนี้")
-    if current_user.role != "admin" and offering.instructor_id != current_user.id:
-        raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้ ปล่อยคืนไม่ได้")
-    offering.instructor_id = None
-    db.commit()
-    db.refresh(offering)
     return offering
