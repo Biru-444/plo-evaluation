@@ -17,8 +17,7 @@ class CourseOfferingSchema(BaseModel):
 
 
 class CourseOfferingCreateSchema(BaseModel):
-    """instructor_id เว้นว่างได้ (None) - หมายถึงวิชานี้ยังไม่มีผู้สอน รอให้อาจารย์จับจองเอง
-    ผ่าน /course-offerings/{id}/claim"""
+    """instructor_id เว้นว่างได้ (None) - หมายถึงวิชานี้ยังไม่มีผู้สอน รอแอดมินมอบหมายทีหลัง"""
 
     model_config = ConfigDict(from_attributes=True)
 
