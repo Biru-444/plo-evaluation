@@ -1,5 +1,16 @@
 """
-Pydantic Schemas for Request/Response Data Validation
+ทำอะไร : รวม import schema (Pydantic model ใช้ validate request/response) ทั้งหมดไว้ที่เดียว เพื่อให้
+         ไฟล์ route เขียน `from app.schemas import StudentSchema, ...` ได้โดยไม่ต้องรู้ว่าอยู่ไฟล์ไหน
+         แต่ละตารางมักมี schema 3 แบบคู่กัน : XSchema (ใช้ตอบกลับ response เต็มรูปแบบ), XCreateSchema
+         (รับตอนสร้างใหม่ - ไม่มี id เพราะฐานข้อมูล generate ให้), XUpdateSchema (รับตอนแก้ไข - ทุก
+         field เป็น optional เพราะแก้บางส่วนได้ ไม่ต้องส่งมาครบ)
+
+เชื่อมกับ : import จากทุกไฟล์ใน app/schemas/*.py — ไฟล์ route ทุกไฟล์ใช้ schema จากที่นี่ประกอบ
+            response_model และ request body ของ endpoint
+
+ถ้าแก้ : PLOCoursePlanItemSchema และ RecommendedOfferingSchema ถูก import แต่ไม่ได้อยู่ใน __all__
+         ด้านล่าง (ตั้งใจ ไม่ใช่ลืม) — ยังใช้งานจริงอยู่ที่ app/routes/plo.py และ app/routes/students.py
+         ตามลำดับ เพียงแต่ import ตรงจากไฟล์ย่อยแทนที่จะผ่าน __all__ ของที่นี่
 """
 from .user import UserSchema, UserCreateSchema, UserUpdateSchema
 from .curriculum import CurriculumSchema, CurriculumCreateSchema, CurriculumUpdateSchema

@@ -1,4 +1,15 @@
-"""API routes for Student"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง student บวก endpoint แนะนำวิชาที่
+         ควรลงทะเบียน (recommended-offerings) — คนละเรื่องกับ endpoint คำนวณผลบรรลุ (อยู่ที่
+         plo_calculation.py/ylo_calculation.py แทน)
+
+เชื่อมกับ : recommended-offerings ใช้ _ACADEMIC_YEAR_BASE (2500) แปลง cohort_year+year_level เป็น
+            academic_year ของ course_offering ที่ควรมีอยู่จริง แล้วหาว่านักศึกษายังไม่ได้ลงทะเบียน
+            วิชาไหนที่ study_plan แนะนำไว้บ้าง
+
+ถ้าแก้ : create/update/delete เฉพาะ admin — list/get/recommended-offerings เปิดให้ทุก role ดูได้ ลบ
+         นักศึกษาจะ cascade ลบ enrollment/student_score ของคนนั้นไปด้วยทั้งหมด
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +33,8 @@ router = APIRouter(prefix="/students", tags=["Students"])
 _ACADEMIC_YEAR_BASE = 2500
 
 
+# คืนรายชื่อนักศึกษาทั้งหมด (ไม่มี filter ในตัว endpoint นี้ — filter ทำฝั่ง frontend จากข้อมูลที่โหลด
+# มาแล้ว)
 @router.get("", response_model=list[StudentSchema])
 def list_students(
     db: Session = Depends(get_db),
@@ -30,6 +43,7 @@ def list_students(
     return db.query(Student).order_by(Student.id).all()
 
 
+# คืนนักศึกษารายตัวตามรหัส
 @router.get("/{student_id}", response_model=StudentSchema)
 def get_student(
     student_id: str,
@@ -111,6 +125,7 @@ def get_recommended_offerings(
     return recommendations
 
 
+# สร้างนักศึกษาใหม่ (admin เท่านั้น) — 409 ถ้ารหัสนักศึกษาซ้ำ หรืออ้าง curriculum ที่ไม่มีจริง
 @router.post("", response_model=StudentSchema, status_code=201)
 def create_student(
     payload: StudentCreateSchema,
@@ -131,6 +146,7 @@ def create_student(
     return student
 
 
+# แก้ไขข้อมูลนักศึกษา (admin เท่านั้น) — เช่น เปลี่ยนสถานะ, ชั้นปีที่เรียน, หมู่
 @router.put("/{student_id}", response_model=StudentSchema)
 def update_student(
     student_id: str,
@@ -152,6 +168,7 @@ def update_student(
     return student
 
 
+# ลบนักศึกษา (admin เท่านั้น)
 @router.delete("/{student_id}", status_code=204)
 def delete_student(
     student_id: str,

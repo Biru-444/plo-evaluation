@@ -1,4 +1,14 @@
-"""API routes for AssessmentItem and StudentScore"""
+"""
+ทำอะไร : CRUD สำหรับ assessment_item (ชิ้นงาน/ข้อสอบ) และ student_score (คะแนนดิบของนักศึกษาแต่ละคน)
+         — ข้อมูลดิบที่สุดที่ทุกสูตรคำนวณ CLO/PLO/YLO ในระบบนี้อ่านย้อนขึ้นมาจากตารางเหล่านี้
+
+เชื่อมกับ : create/update assessment_item และ student_score เช็คสิทธิ์ความเป็นเจ้าของวิชาเหมือน clo.py/
+            item_clo.py (instructor แก้ได้เฉพาะ offering ที่ตัวเองสอน) — create/update student_score
+            เช็คว่าคะแนนที่กรอกไม่เกินคะแนนเต็มของชิ้นงานนั้นเสมอ (400 ถ้าเกิน)
+
+ถ้าแก้ : ไม่มี endpoint ลบ student_score โดยตรง (ลบทางอ้อมได้ผ่านการลบ assessment_item ซึ่ง cascade
+         ลบคะแนนที่ผูกอยู่ไปด้วย)
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +31,7 @@ from app.schemas import (
 router = APIRouter(tags=["Assessment"])
 
 
+# คืนรายการชิ้นงานทั้งหมด กรองตาม offering_id ได้
 @router.get("/assessment-items", response_model=list[AssessmentItemSchema])
 def list_assessment_items(
     offering_id: int | None = None,
@@ -33,6 +44,7 @@ def list_assessment_items(
     return query.order_by(AssessmentItem.id).all()
 
 
+# คืนชิ้นงานรายตัวตาม id
 @router.get("/assessment-items/{item_id}", response_model=AssessmentItemSchema)
 def get_assessment_item(
     item_id: int,
@@ -45,6 +57,7 @@ def get_assessment_item(
     return item
 
 
+# สร้างชิ้นงานใหม่ — instructor สร้างได้เฉพาะใน offering ที่ตัวเองสอน
 @router.post("/assessment-items", response_model=AssessmentItemSchema, status_code=201)
 def create_assessment_item(
     payload: AssessmentCreateSchema,
@@ -70,6 +83,7 @@ def create_assessment_item(
     return item
 
 
+# แก้ไขชิ้นงาน (เช่น เปลี่ยนคะแนนเต็ม) — เช็คสิทธิ์ความเป็นเจ้าของวิชาเช่นเดียวกับตอนสร้าง
 @router.put("/assessment-items/{item_id}", response_model=AssessmentItemSchema)
 def update_assessment_item(
     item_id: int,
@@ -97,6 +111,7 @@ def update_assessment_item(
     return item
 
 
+# ลบชิ้นงาน — เช็คสิทธิ์ความเป็นเจ้าของวิชาเช่นเดียวกับตอนสร้าง
 @router.delete("/assessment-items/{item_id}", status_code=204)
 def delete_assessment_item(
     item_id: int,
@@ -114,6 +129,8 @@ def delete_assessment_item(
     db.commit()
 
 
+# คืนคะแนนของนักศึกษา (ระบุ student_id) หรือของทั้งห้อง (ระบุ offering_id) อย่างใดอย่างหนึ่งต้องมี
+# มาอย่างน้อย 1 ตัว (400 ถ้าไม่ระบุเลย) — join กับ AssessmentItem เพื่อแนบชื่อ/คะแนนเต็มมาให้ในตัวเดียว
 @router.get("/student-scores", response_model=list[StudentScoreDetailSchema])
 def list_student_scores(
     student_id: str | None = Query(None, description="Student ID, e.g. 6500001"),
@@ -143,6 +160,8 @@ def list_student_scores(
     ]
 
 
+# บันทึกคะแนนของนักศึกษา 1 คนต่อชิ้นงาน 1 ชิ้น — 400 ถ้าคะแนนเกินคะแนนเต็มของชิ้นงานนั้น 409 ถ้ามี
+# คะแนนของคนนี้/ชิ้นงานนี้อยู่แล้ว (ต้องใช้ PUT แก้แทน ไม่ใช่ POST ซ้ำ)
 @router.post("/student-scores", response_model=StudentScoreSchema, status_code=201)
 def create_student_score(
     payload: StudentScoreCreateSchema,
@@ -172,6 +191,7 @@ def create_student_score(
     return score
 
 
+# แก้ไขคะแนนที่บันทึกไว้แล้ว — 400 ถ้าคะแนนใหม่เกินคะแนนเต็มของชิ้นงานนั้นเช่นเดียวกับตอนสร้าง
 @router.put("/student-scores/{score_id}", response_model=StudentScoreSchema)
 def update_student_score(
     score_id: int,

@@ -1,4 +1,6 @@
-"""Pydantic schemas for User"""
+"""Pydantic schemas for User — field ความหมายตรงกับ app/models/user.py ทุกตัว (ดูคอมเมนต์ที่นั่น)
+UserCreateSchema.password รับเป็น plain text จากฝั่ง client แล้ว route เป็นคนเรียก hash_password()
+เข้ารหัสก่อนบันทึก (ไม่มีการเข้ารหัสในชั้น schema)"""
 from __future__ import annotations
 
 from datetime import datetime

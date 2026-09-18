@@ -1,4 +1,4 @@
-"""Pydantic schemas for PLO"""
+"""Pydantic schemas for PLO — field ความหมายตรงกับ app/models/plo.py ทุกตัว"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

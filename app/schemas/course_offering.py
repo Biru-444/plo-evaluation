@@ -1,4 +1,4 @@
-"""Pydantic schemas for CourseOffering"""
+"""Pydantic schemas for CourseOffering — field ความหมายตรงกับ app/models/course_offering.py ทุกตัว"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

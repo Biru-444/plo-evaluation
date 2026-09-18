@@ -1,4 +1,14 @@
-"""API routes for CoursePLO"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course_plo — ตารางที่สำคัญที่สุดใน
+         การคำนวณ PLO/YLO ทั้งระบบ (ดูคอมเมนต์ที่ app/models/course_plo.py)
+
+เชื่อมกับ : responsibility_level ที่แก้ที่นี่ ('primary' <-> 'secondary') มีผลโดยตรงต่อ
+            _build_plo_requirements ใน plo_calculation.py — เปลี่ยนวิชานี้จาก secondary เป็น primary
+            (หรือกลับกัน) จะทำให้ % บรรลุ PLO ของนักศึกษาทุกคนเปลี่ยนทันทีที่ query ครั้งถัดไป
+
+ถ้าแก้ : เฉพาะ admin เท่านั้นที่แก้ได้ (การตัดสินใจระดับหลักสูตร/มคอ.2 ไม่ใช่สิ่งที่อาจารย์ผู้สอนควร
+         แก้เองได้) — list/get เปิดให้ทุก role ดูได้
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +23,7 @@ from app.schemas import CoursePLOCreateSchema, CoursePLOSchema, CoursePLOUpdateS
 router = APIRouter(prefix="/course-plo", tags=["Course-PLO Mapping"])
 
 
+# คืนรายการ mapping ทั้งหมด กรองตาม course_id ได้
 @router.get("", response_model=list[CoursePLOSchema])
 def list_course_plo(
     course_id: int | None = None,
@@ -25,6 +36,7 @@ def list_course_plo(
     return query.order_by(CoursePLO.id).all()
 
 
+# คืน mapping รายตัวตาม id
 @router.get("/{course_plo_id}", response_model=CoursePLOSchema)
 def get_course_plo(
     course_plo_id: int,
@@ -37,6 +49,7 @@ def get_course_plo(
     return course_plo
 
 
+# สร้าง mapping ใหม่ (admin เท่านั้น) — 409 ถ้าซ้ำ (course+plo เดิม) หรืออ้าง course/plo ที่ไม่มีจริง
 @router.post("", response_model=CoursePLOSchema, status_code=201)
 def create_course_plo(
     payload: CoursePLOCreateSchema,
@@ -57,6 +70,8 @@ def create_course_plo(
     return course_plo
 
 
+# แก้ไข responsibility_level ('primary'/'secondary') — จุดเดียวที่แก้ได้ในตารางนี้ (course_id/plo_id
+# แก้ไม่ได้ ต้องลบแล้วสร้างใหม่)
 @router.put("/{course_plo_id}", response_model=CoursePLOSchema)
 def update_course_plo(
     course_plo_id: int,
@@ -80,6 +95,7 @@ def update_course_plo(
     return course_plo
 
 
+# ลบ mapping (admin เท่านั้น)
 @router.delete("/{course_plo_id}", status_code=204)
 def delete_course_plo(
     course_plo_id: int,

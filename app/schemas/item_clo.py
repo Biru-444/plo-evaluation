@@ -1,4 +1,5 @@
-"""Pydantic schemas for ItemCLO"""
+"""Pydantic schemas for ItemCLO — field ความหมายตรงกับ app/models/assessment.py (คลาส ItemCLO)
+weight_percent คือน้ำหนักที่ใช้ในสูตรคำนวณ mastery แบบถ่วงน้ำหนักทั้งระบบ"""
 from __future__ import annotations
 
 from decimal import Decimal

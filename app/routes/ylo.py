@@ -1,4 +1,13 @@
-"""API routes for YLO"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง ylo (เป้าหมายการเรียนรู้ระดับ
+         ชั้นปี) — คนละไฟล์กับ app/routes/ylo_calculation.py ที่คำนวณ "% บรรลุ" (ไฟล์นี้จัดการแค่
+         ข้อมูล YLO เอง ไม่คำนวณอะไร)
+
+เชื่อมกับ : ลบ YLO ที่นี่จะ cascade ลบ ylo_plo_mapping ที่อ้างถึงไปด้วย (ดู app/models/ylo.py) กระทบ
+            การคำนวณ YLO ปีนั้นทันที (ไม่มีวิชาบังคับให้ตัดสินอีกต่อไป)
+
+ถ้าแก้ : เฉพาะ admin เท่านั้นที่แก้ได้ — list/get เปิดให้ทุก role ดูได้
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +22,7 @@ from app.schemas import YLOCreateSchema, YLOSchema, YLOUpdateSchema
 router = APIRouter(prefix="/ylo", tags=["YLO"])
 
 
+# คืนรายการ YLO ทั้งหมด กรองตาม curriculum_id ได้
 @router.get("", response_model=list[YLOSchema])
 def list_ylo(
     curriculum_id: int | None = None,
@@ -25,6 +35,7 @@ def list_ylo(
     return query.order_by(YLO.id).all()
 
 
+# คืน YLO รายตัวตาม id
 @router.get("/{ylo_id}", response_model=YLOSchema)
 def get_ylo(
     ylo_id: int,
@@ -37,6 +48,7 @@ def get_ylo(
     return ylo
 
 
+# สร้าง YLO ใหม่ (admin เท่านั้น) — 409 ถ้า year_level ซ้ำในหลักสูตรเดียวกัน
 @router.post("", response_model=YLOSchema, status_code=201)
 def create_ylo(
     payload: YLOCreateSchema,
@@ -57,6 +69,7 @@ def create_ylo(
     return ylo
 
 
+# แก้ไข YLO (admin เท่านั้น)
 @router.put("/{ylo_id}", response_model=YLOSchema)
 def update_ylo(
     ylo_id: int,
@@ -81,6 +94,7 @@ def update_ylo(
     return ylo
 
 
+# ลบ YLO (admin เท่านั้น)
 @router.delete("/{ylo_id}", status_code=204)
 def delete_ylo(
     ylo_id: int,

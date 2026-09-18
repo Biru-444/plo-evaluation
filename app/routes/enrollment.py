@@ -1,4 +1,18 @@
-"""API routes for Enrollment"""
+"""
+ทำอะไร : CRUD มาตรฐานสำหรับการลงทะเบียนเรียน (enrollment) บวกกลุ่ม endpoint ลงทะเบียนแบบกลุ่ม (bulk) 3
+         รูปแบบ: ทั้งรุ่น (by-cohort), เลือกรายชื่อเอง (bulk), และอัปโหลดไฟล์ CSV/XLSX (bulk-upload) —
+         ทั้งสามแบบใช้ logic การกันซ้ำ/กันชน section เดียวกัน (ผ่าน _bulk_enroll หรือโค้ดคล้ายกันใน
+         bulk_enroll_by_cohort)
+
+เชื่อมกับ : ใช้ PostgreSQL "INSERT ... ON CONFLICT DO NOTHING" (pg_insert().on_conflict_do_nothing())
+            เป็นวิธีป้องกันการลงทะเบียนซ้ำแบบ atomic แทนการ SELECT เช็คก่อนแล้วค่อย INSERT ทีละแถว —
+            เร็วกว่ามากเมื่อลงทะเบียนทีละหลายสิบ/หลายร้อยคน และไม่มี race condition ถ้ามีคนเรียกซ้อนกัน
+
+ถ้าแก้ : เฉพาะ admin หรือ instructor เจ้าของ offering เท่านั้นที่แก้ได้ (เช็คผ่าน
+         _require_offering_ownership) — ระบบรองรับวิชาที่แยกหลาย section/หมู่ (เช่นรุ่น 69) จึงมีการ
+         เช็ค "ชนกับ section อื่นของวิชาเดียวกันหรือไม่" แทรกอยู่แทบทุกจุดที่ลงทะเบียน (ดู
+         _students_in_other_sections)
+"""
 from __future__ import annotations
 
 import csv
@@ -31,6 +45,9 @@ router = APIRouter(prefix="/enrollments", tags=["Enrollments"])
 STUDENT_ID_HEADER_ALIASES = {"รหัสนักศึกษา", "student_id", "id"}
 
 
+# เช็คว่า offering_id มีอยู่จริง และผู้ใช้ปัจจุบันมีสิทธิ์แก้ไข (admin แก้ได้ทุก offering, instructor
+# แก้ได้เฉพาะ offering ที่ตัวเองเป็นผู้สอน) — 404/403 ตามเหตุผล ใช้ซ้ำในทุก endpoint ที่แก้ enrollment
+# ของ offering หนึ่ง ๆ
 def _require_offering_ownership(
     db: Session, offering_id: int, current_user: User
 ) -> CourseOffering:
@@ -142,6 +159,9 @@ def _bulk_enroll(db: Session, offering: CourseOffering, raw_student_ids: list[st
     )
 
 
+# อ่านไฟล์ .csv/.xlsx ที่ผู้ใช้อัปโหลด (ใช้เอง ต่างจาก app/routes/roster_import.py ที่อ่านไฟล์ .xls
+# ทางการของมหาวิทยาลัย) หาคอลัมน์รหัสนักศึกษาจากหัวตาราง (รองรับ "รหัสนักศึกษา"/"student_id"/"id")
+# แล้วคืนแค่ลิสต์รหัสนักศึกษาดิบ ๆ ให้ _bulk_enroll ไปประมวลผลต่อ
 def _parse_roster_file(filename: str, content: bytes) -> list[str]:
     lower_name = filename.lower()
     if lower_name.endswith(".csv"):
@@ -181,6 +201,7 @@ def _parse_roster_file(filename: str, content: bytes) -> list[str]:
     return student_ids
 
 
+# คืนรายการลงทะเบียนทั้งหมด กรองตาม offering_id หรือ student_id ได้
 @router.get("", response_model=list[EnrollmentSchema])
 def list_enrollments(
     offering_id: int | None = None,
@@ -221,6 +242,7 @@ def list_sibling_section_enrollments(
     return [OtherSectionConflict(student_id=sid, section=section) for sid, section in rows]
 
 
+# คืนรายการลงทะเบียนรายตัวตาม id
 @router.get("/{enrollment_id}", response_model=EnrollmentSchema)
 def get_enrollment(
     enrollment_id: int,
@@ -233,6 +255,7 @@ def get_enrollment(
     return enrollment
 
 
+# ลงทะเบียนนักศึกษา 1 คนเข้า offering เดียว (ทีละคน) — instructor ทำได้เฉพาะ offering ที่ตัวเองสอน
 @router.post("", response_model=EnrollmentSchema, status_code=201)
 def create_enrollment(
     payload: EnrollmentCreateSchema,
@@ -258,6 +281,7 @@ def create_enrollment(
     return enrollment
 
 
+# แก้ไขการลงทะเบียน (ปกติแก้แค่ final_grade)
 @router.put("/{enrollment_id}", response_model=EnrollmentSchema)
 def update_enrollment(
     enrollment_id: int,
@@ -283,6 +307,7 @@ def update_enrollment(
     return enrollment
 
 
+# ถอนการลงทะเบียน 1 รายการ
 @router.delete("/{enrollment_id}", status_code=204)
 def delete_enrollment(
     enrollment_id: int,
@@ -300,6 +325,8 @@ def delete_enrollment(
     db.commit()
 
 
+# ลงทะเบียนนักศึกษาทั้งรุ่น (cohort_year) เข้า offering เดียวในครั้งเดียว — ข้ามคนที่ลงแล้ว หรือชนกับ
+# section อื่นของวิชาเดียวกันไปแล้ว (ดู _students_in_other_sections)
 @router.post("/bulk-by-cohort", response_model=BulkEnrollByCohortResult)
 def bulk_enroll_by_cohort(
     payload: BulkEnrollByCohortSchema,
@@ -362,6 +389,7 @@ def bulk_enroll_by_cohort(
     )
 
 
+# ถอนนักศึกษาทั้งรุ่น (cohort_year) ออกจาก offering ในครั้งเดียว (ตรงข้ามกับ bulk-by-cohort ด้านบน)
 @router.post("/bulk-by-cohort-delete", response_model=BulkRemoveByCohortResult)
 def bulk_remove_by_cohort(
     payload: BulkEnrollByCohortSchema,
@@ -394,6 +422,8 @@ def bulk_remove_by_cohort(
     return BulkRemoveByCohortResult(removed_count=len(matches), removed_students=removed_students)
 
 
+# ลงทะเบียนนักศึกษาตามรายชื่อที่เลือกเอง (student_ids) เข้า offering เดียว — logic เหมือน
+# bulk-by-cohort แต่รายชื่อมาจาก client แทนที่จะ query จาก cohort_year
 @router.post("/bulk", response_model=BulkEnrollResult)
 def bulk_enroll_students(
     payload: BulkEnrollSchema,
@@ -404,6 +434,8 @@ def bulk_enroll_students(
     return _bulk_enroll(db, offering, payload.student_ids)
 
 
+# เหมือน /bulk ทุกประการ แต่รับรายชื่อนักศึกษาจากไฟล์ .csv/.xlsx ที่อัปโหลดแทนการพิมพ์รายชื่อเอง (ดู
+# _parse_roster_file)
 @router.post("/bulk-upload", response_model=BulkEnrollResult)
 async def bulk_enroll_upload(
     offering_id: int = Form(...),

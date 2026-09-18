@@ -1,4 +1,15 @@
-"""API routes for CLO"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง clo — คนละไฟล์กับ
+         app/routes/clo_calculation.py ที่คำนวณ "% บรรลุ" (ไฟล์นี้จัดการแค่ข้อมูล CLO เอง)
+
+เชื่อมกับ : create/update/delete เช็คสิทธิ์ความเป็นเจ้าของวิชาซ้ำ 3 จุด (create/update/delete) —
+            admin แก้ CLO วิชาไหนก็ได้ แต่ instructor แก้ได้เฉพาะ CLO ของวิชาที่ตัวเองเป็นผู้สอนอยู่
+            จริงเท่านั้น (เช็คผ่าน course_offering.instructor_id) — created_by ถูกเซ็ตจาก
+            current_user.id เสมอ ไม่รับค่าจาก client (ดู CLOCreateSchema)
+
+ถ้าแก้ : เกณฑ์ผ่าน (pass_threshold_percent) ที่แก้ผ่าน update_clo กระทบการตัดสิน CLO ผ่าน/ไม่ผ่าน
+         ย้อนหลังทั้งหมดทันที (ดู app/models/clo.py)
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +24,7 @@ from app.schemas import CLOCreateSchema, CLOSchema, CLOUpdateSchema
 router = APIRouter(prefix="/clo", tags=["CLO"])
 
 
+# คืนรายการ CLO ทั้งหมด กรองตาม course_id ได้
 @router.get("", response_model=list[CLOSchema])
 def list_clo(
     course_id: int | None = None,
@@ -25,6 +37,7 @@ def list_clo(
     return query.order_by(CLO.id).all()
 
 
+# คืน CLO รายตัวตาม id
 @router.get("/{clo_id}", response_model=CLOSchema)
 def get_clo(
     clo_id: int,
@@ -37,6 +50,8 @@ def get_clo(
     return clo
 
 
+# สร้าง CLO ใหม่ — instructor สร้างได้เฉพาะในวิชาที่ตัวเองสอนอยู่ (เช็คสิทธิ์ด้านล่าง) created_by
+# เซ็ตจากผู้ใช้ที่ login อยู่เสมอ 409 ถ้ารหัส (code) ซ้ำในวิชาเดียวกัน
 @router.post("", response_model=CLOSchema, status_code=201)
 def create_clo(
     payload: CLOCreateSchema,
@@ -69,6 +84,7 @@ def create_clo(
     return clo
 
 
+# แก้ไข CLO — instructor แก้ได้เฉพาะ CLO ของวิชาที่ตัวเองสอนอยู่ (เช็คสิทธิ์ด้านล่าง)
 @router.put("/{clo_id}", response_model=CLOSchema)
 def update_clo(
     clo_id: int,
@@ -101,6 +117,7 @@ def update_clo(
     return clo
 
 
+# ลบ CLO — instructor ลบได้เฉพาะ CLO ของวิชาที่ตัวเองสอนอยู่ (เช็คสิทธิ์ด้านล่าง)
 @router.delete("/{clo_id}", status_code=204)
 def delete_clo(
     clo_id: int,

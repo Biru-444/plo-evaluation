@@ -1,4 +1,4 @@
-"""Pydantic schemas for Curriculum"""
+"""Pydantic schemas for Curriculum — field ความหมายตรงกับ app/models/curriculum.py ทุกตัว"""
 from __future__ import annotations
 
 from datetime import datetime

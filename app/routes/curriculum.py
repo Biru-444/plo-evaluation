@@ -1,4 +1,12 @@
-"""API routes for Curriculum"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง curriculum — จุดเริ่มต้นของทุก
+         ข้อมูลในระบบ (PLO/YLO/Course/Student/StudyPlan ทุกตัวผูกกับหลักสูตรใดหลักสูตรหนึ่งเสมอ)
+
+เชื่อมกับ : ลบหลักสูตรที่นี่จะ cascade ลบ PLO/YLO/Course/StudyPlan ของหลักสูตรนั้นตามไปด้วยทั้งหมด (ดู
+            คำเตือนในคอมเมนต์ของ delete_curriculum ด้านล่าง)
+
+ถ้าแก้ : เฉพาะ admin เท่านั้นที่แก้ได้ — list/get เปิดให้ทุก role ดูได้
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +21,7 @@ from app.schemas import CurriculumCreateSchema, CurriculumSchema, CurriculumUpda
 router = APIRouter(prefix="/curricula", tags=["Curriculum"])
 
 
+# คืนรายการหลักสูตรทั้งหมด
 @router.get("", response_model=list[CurriculumSchema])
 def list_curricula(
     db: Session = Depends(get_db),
@@ -21,6 +30,7 @@ def list_curricula(
     return db.query(Curriculum).order_by(Curriculum.id).all()
 
 
+# คืนหลักสูตรรายตัวตาม id
 @router.get("/{curriculum_id}", response_model=CurriculumSchema)
 def get_curriculum(
     curriculum_id: int,
@@ -33,6 +43,7 @@ def get_curriculum(
     return curriculum
 
 
+# สร้างหลักสูตรใหม่ (admin เท่านั้น)
 @router.post("", response_model=CurriculumSchema, status_code=201)
 def create_curriculum(
     payload: CurriculumCreateSchema,
@@ -50,6 +61,7 @@ def create_curriculum(
     return curriculum
 
 
+# แก้ไขหลักสูตร (admin เท่านั้น)
 @router.put("/{curriculum_id}", response_model=CurriculumSchema)
 def update_curriculum(
     curriculum_id: int,

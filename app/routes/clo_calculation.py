@@ -1,15 +1,21 @@
 """
-Per-offering CLO achievement calculation.
+ทำอะไร : เส้นทาง API สำหรับคำนวณ "% ความเชี่ยวชาญ CLO" (mastery) ระดับ course_offering (1 กลุ่มเรียน
+         ของ 1 วิชา) — ต่างจาก plo_calculation.py ที่คำนวณระดับนักศึกษา/หลักสูตรทั้งก้อน ไฟล์นี้ตอบคำถาม
+         "ทั้งห้องนี้ ใครผ่าน CLO ไหนบ้าง" และ "นักศึกษาคนนี้ วิชานี้ ได้คะแนนแต่ละ CLO เท่าไหร่ จาก
+         ชิ้นงานอะไรบ้าง" — CLO เป็นของวิชา (course) ส่วนคะแนนจริงผูกกับ offering ที่นักศึกษาลงทะเบียน
 
-Unlike plo_calculation.py (student- and curriculum-level PLO achievement),
-this computes CLO mastery for one course_offering's whole class - the CLOs
-belong to the offering's course, and only students enrolled in that
-offering are considered.
+สูตรคำนวณ : ค่าเฉลี่ยถ่วงน้ำหนักแบบเดียวกับ "ขั้นตอนที่ 1" ใน
+  plo_calculation.py._clo_mastery_for_student คือ
+  sum(score/total_score*100 * item_clo.weight_percent) / sum(item_clo.weight_percent)
+  นับเฉพาะ assessment item ที่นักศึกษามีคะแนนบันทึกไว้จริงเท่านั้น
 
-Calculation: same weighted-average CLO mastery as
-_calculate_plo_achievement_for_student's "Step 1" in plo_calculation.py -
-sum(score/total_score*100 * item_clo.weight_percent) / sum(item_clo.weight_percent),
-counting only assessment items the student actually has a recorded score for.
+เชื่อมกับ : - อ่านจากตาราง clo, assessment_item, item_clo, student_score, enrollment
+            - GET /clo-achievement (ไม่มี path ต่อท้าย) ใช้ในหน้าจัดการ offering (ดูผลสอบทั้งห้อง)
+            - GET /clo-achievement/student-course ใช้ในหน้าผลบรรลุรายบุคคล (student-plo) ตอนขยายดู
+              รายวิชา
+
+ถ้าแก้ : สูตรในไฟล์นี้ต้องตรงกับสูตรใน plo_calculation.py เสมอ (คำนวณ mastery เหมือนกันแต่คนละ scope)
+         ถ้าแก้ไม่พร้อมกัน ตัวเลข mastery รายวิชาที่นี่กับที่ใช้ตัดสิน PLO จะไม่ตรงกัน
 """
 from __future__ import annotations
 
@@ -36,6 +42,7 @@ from app.models import (
 router = APIRouter(prefix="/clo-achievement", tags=["CLO Achievement"])
 
 
+# คะแนน CLO ข้อเดียวของนักศึกษา 1 คนในห้อง (ใช้เป็นรายการย่อยใน CLOAchievementItem.student_scores)
 class StudentCLOScore(BaseModel):
     student_id: str
     student_name: str
@@ -43,6 +50,7 @@ class StudentCLOScore(BaseModel):
     passed: bool
 
 
+# สรุปผล CLO ข้อเดียวของทั้งห้อง (offering) — จำนวนผ่าน/ไม่ผ่าน/ไม่มีข้อมูล พร้อมคะแนนรายคน
 class CLOAchievementItem(BaseModel):
     clo_id: int
     clo_code: str
@@ -55,12 +63,14 @@ class CLOAchievementItem(BaseModel):
     student_scores: list[StudentCLOScore]
 
 
+# response ของ GET /clo-achievement — ผล CLO ทุกข้อของ offering เดียว
 class OfferingCLOAchievement(BaseModel):
     offering_id: int
     course_name: str
     clo_achievements: list[CLOAchievementItem]
 
 
+# ชิ้นงาน (assessment item) 1 ชิ้นที่ส่งผลต่อ CLO ข้อหนึ่ง พร้อมคะแนนที่นักศึกษาคนนี้ได้จริง
 class CLOItemContribution(BaseModel):
     item_id: int
     item_name: str
@@ -70,6 +80,7 @@ class CLOItemContribution(BaseModel):
     weight_percent: Decimal
 
 
+# ผล CLO ข้อเดียวของนักศึกษา 1 คนในวิชาเดียว พร้อมรายชิ้นงานที่ประกอบเป็นคะแนนนี้ (items)
 class StudentCourseCLOItem(BaseModel):
     clo_id: int
     clo_code: str
@@ -80,6 +91,7 @@ class StudentCourseCLOItem(BaseModel):
     items: list[CLOItemContribution]
 
 
+# response ของ GET /clo-achievement/student-course — ผล CLO ทุกข้อของวิชานี้ สำหรับนักศึกษา 1 คน
 class StudentCourseCLOBreakdown(BaseModel):
     student_id: str
     course_id: int
@@ -95,6 +107,16 @@ def get_offering_clo_achievement(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    ทำอะไร : คำนวณผล CLO ทุกข้อของวิชานี้ สำหรับนักศึกษาทั้งห้อง (offering) เดียว — คืนจำนวนคนผ่าน/
+             ไม่ผ่าน/ไม่มีข้อมูล ต่อ CLO พร้อมคะแนน % ของนักศึกษาแต่ละคน
+
+    เชื่อมกับ : อ่าน enrollment เพื่อหา roster ของ offering นี้ แล้วคำนวณ mastery ต่อ CLO ต่อคนด้วย
+                สูตรถ่วงน้ำหนักเดียวกับ plo_calculation.py — ใช้ในหน้าจัดการ offering ของอาจารย์/แอดมิน
+
+    ถ้าแก้ : 404 ถ้าไม่พบ offering_id — นักศึกษาที่ weight_total เป็น 0 (ไม่มีคะแนนชิ้นงานที่ผูกกับ
+             CLO นี้เลย) จะถูกนับใน students_without_data ไม่ใช่ passed_count หรือ failed_count
+    """
     offering = db.get(CourseOffering, offering_id)
     if offering is None:
         raise HTTPException(status_code=404, detail="Course offering not found")
@@ -148,6 +170,8 @@ def get_offering_clo_achievement(
         for student in roster:
             weighted_sum = Decimal(0)
             weight_total = Decimal(0)
+            # สูตรเดียวกับ plo_calculation.py._clo_mastery_for_student: แปลงคะแนนดิบเป็น % แล้ว
+            # ถ่วงน้ำหนักด้วย item_clo.weight_percent สะสมเป็นตัวตั้ง/ตัวหารของ CLO นี้
             for ic in mappings:
                 item = item_by_id.get(ic.item_id)
                 score = scores_by_student_item.get((student.id, ic.item_id))
@@ -159,6 +183,8 @@ def get_offering_clo_achievement(
 
             student_name = f"{student.first_name} {student.last_name}"
 
+            # weight_total > 0 แปลว่ามีคะแนนชิ้นงานที่ผูกกับ CLO นี้อย่างน้อย 1 ชิ้น จึงคำนวณ % และ
+            # ตัดสินผ่าน/ไม่ผ่านได้ — ถ้าไม่มีเลยจะตกไปกิ่ง else ด้านล่าง (นับเป็น "ไม่มีข้อมูล")
             if weight_total > 0:
                 clo_percent = (weighted_sum / weight_total).quantize(Decimal("0.1"))
                 passed = clo_percent >= clo.pass_threshold_percent
@@ -185,6 +211,8 @@ def get_offering_clo_achievement(
                     )
                 )
 
+        # achieved_rate_percent คิดจากคนที่ "มีข้อมูลให้ตัดสิน" เท่านั้น (passed + failed) ไม่รวม
+        # students_without_data เข้าตัวหาร เพื่อไม่ให้คนที่ยังไม่มีคะแนนถูกนับเป็น "ไม่ผ่าน" ปนไปด้วย
         denom = passed_count + failed_count
         achieved_rate_percent = (
             float(Decimal(passed_count) / Decimal(denom) * Decimal(100))
@@ -220,9 +248,17 @@ def get_student_course_clo_breakdown(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """เจาะลึกระดับ CLO -> คะแนน สำหรับนักศึกษาคนเดียวในวิชาเดียว - ใช้ในหน้ารายละเอียดนักศึกษา
-    (student-plo) ตอนกดขยายดูว่าทำไมวิชานั้นถึงผ่าน/ไม่ผ่าน ใช้สูตรเดียวกับ _clo_mastery_for_student
-    ใน plo_calculation.py (weighted average) แต่คืนรายละเอียดราย item ด้วย ไม่ใช่แค่ตัวเลขสรุป"""
+    """
+    ทำอะไร : เจาะลึกระดับ CLO -> คะแนน สำหรับนักศึกษาคนเดียวในวิชาเดียว คืนทั้งค่า mastery สรุปต่อ CLO
+             และรายละเอียดว่าแต่ละชิ้นงาน (assessment item) ให้คะแนนเท่าไหร่ น้ำหนักเท่าไหร่
+
+    เชื่อมกับ : ใช้สูตรเดียวกับ _clo_mastery_for_student ใน plo_calculation.py (weighted average) แต่
+                คืนรายละเอียดราย item ด้วย ไม่ใช่แค่ตัวเลขสรุป — เรียกจากหน้ารายละเอียดนักศึกษา
+                (student-plo) ตอนกดขยายดูว่าทำไมวิชานั้นถึงผ่าน/ไม่ผ่าน (CourseCLOBreakdown.jsx)
+
+    ถ้าแก้ : 404 ถ้าไม่พบนักศึกษาหรือวิชา — offering_id เป็น None ถ้านักศึกษาคนนี้ไม่เคยลงทะเบียนวิชา
+             นี้เลย (clos จะคืนมาแต่ mastery_percent เป็น None ทุกข้อ เพราะไม่มี offering ให้เทียบคะแนน)
+    """
     student = db.get(Student, student_id)
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -274,6 +310,8 @@ def get_student_course_clo_breakdown(
             if item is None:
                 continue
             score = scores_by_item.get(ic.item_id)
+            # สะสม weighted_sum/weight_total เฉพาะชิ้นงานที่มีคะแนนแล้ว (สูตรเดียวกับที่อื่นในระบบ) แต่
+            # ยังคงเก็บ contributions ของทุกชิ้นงานไว้แสดง แม้จะยังไม่มีคะแนน (score_obtained เป็น None)
             if score is not None and item.total_score > 0:
                 item_percent = (score / item.total_score) * Decimal(100)
                 weighted_sum += item_percent * ic.weight_percent

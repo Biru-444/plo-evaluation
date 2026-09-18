@@ -1,4 +1,5 @@
-"""Pydantic schemas for StudyPlan"""
+"""Pydantic schemas for StudyPlan — field ความหมายตรงกับ app/models/study_plan.py ทุกตัว
+(cohort_year เป็น None = แผนมาตรฐาน ดูรายละเอียดที่ model)"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

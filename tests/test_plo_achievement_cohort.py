@@ -32,6 +32,9 @@ def test_cohort_achievement_end_to_end_with_course_plo(client, db_session, admin
     """สร้างหลักสูตร + วิชา + course_plo(primary) + CLO ที่นักศึกษาผ่านเกณฑ์ - ยิง GET
     /plo/achievement/cohort แล้วต้องได้ 200 พร้อมตัวเลขบรรลุที่ถูกต้อง (ไม่ error 500) นี่คือ endpoint
     ที่หน้า "ภาพรวม PLO ทั้งหลักสูตร" (PLODashboard.jsx) เรียกใช้ตรงๆ"""
+    # --- เตรียมข้อมูล: หลักสูตร -> วิชา -> PLO -> course_plo(primary) -> วิชาเปิดสอน -> นักศึกษา
+    # ลงทะเบียน -> CLO -> ชิ้นงาน -> ผูกชิ้นงานกับ CLO -> คะแนนที่ทำให้ผ่านเกณฑ์ (ครบสายที่
+    # _build_plo_requirements ต้องไล่ผ่านทุกขั้นเพื่อคำนวณผลบรรลุ PLO ได้)
     curriculum = Curriculum(name="Test Curriculum", year=2569)
     db_session.add(curriculum)
     db_session.flush()
@@ -79,9 +82,11 @@ def test_cohort_achievement_end_to_end_with_course_plo(client, db_session, admin
     db_session.flush()
 
     db_session.add(ItemCLO(item_id=item.id, clo_id=clo.id, weight_percent=100.00))
+    # 90/100 = 90% >= เกณฑ์ผ่าน 60% ของ CLO1 -> ผ่าน CLO -> ผ่านวิชา -> บรรลุ PLO (all-or-nothing)
     db_session.add(StudentScore(item_id=item.id, student_id=student.id, score_obtained=90.0))
     db_session.commit()
 
+    # --- เรียก endpoint จริงแล้วตรวจผลลัพธ์
     resp = client.get(f"/plo/achievement/cohort?curriculum_id={curriculum.id}")
     assert resp.status_code == 200
     body = resp.json()
@@ -92,5 +97,8 @@ def test_cohort_achievement_end_to_end_with_course_plo(client, db_session, admin
 
 
 def test_cohort_achievement_curriculum_not_found_returns_404(client, db_session):
+    """ขอผลบรรลุ PLO ของ curriculum_id ที่ไม่มีอยู่จริง - ต้องได้ 404 ไม่ใช่ 200 พร้อมข้อมูลว่างเปล่า
+    หรือ 500 error ถ้าเทสนี้ fail แปลว่า endpoint ไม่ได้เช็คว่าหลักสูตรมีอยู่จริงก่อนคำนวณ (อาจ error
+    หรือคืนผลลัพธ์ผิดๆ แทนที่จะบอกชัดเจนว่าไม่พบหลักสูตร)"""
     resp = client.get("/plo/achievement/cohort?curriculum_id=999999")
     assert resp.status_code == 404

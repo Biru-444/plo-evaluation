@@ -1,4 +1,15 @@
-"""API routes for Course"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course บวก endpoint พิเศษ
+         enrolled-students (ดูรายชื่อนักศึกษาที่ลงทะเบียนวิชานี้จริง พร้อมคำนวณผลบรรลุ PLO เสริมได้)
+
+เชื่อมกับ : enrolled-students import ฟังก์ชันคำนวณตรงจาก plo_calculation.py
+            (_build_plo_requirements, _clo_mastery_for_students_batch,
+            _student_passed_course_for_plo) เพื่อไม่ให้มี logic คำนวณผลบรรลุแยกที่อาจ drift ไม่ตรงกับ
+            ที่อื่นในระบบ
+
+ถ้าแก้ : create/update/delete เฉพาะ admin — list/get/enrolled-students เปิดให้ทุก role ดูได้ ลบวิชา
+         จะ cascade ลบ course_plo/study_plan/course_offering/clo ที่อ้างถึงไปด้วยทั้งหมด
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,6 +35,7 @@ from app.routes.plo_calculation import (
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
 
+# คืนรายวิชาทั้งหมด
 @router.get("", response_model=list[CourseSchema])
 def list_courses(
     db: Session = Depends(get_db),
@@ -32,6 +44,7 @@ def list_courses(
     return db.query(Course).order_by(Course.id).all()
 
 
+# คืนวิชารายตัวตาม id
 @router.get("/{course_id}", response_model=CourseSchema)
 def get_course(
     course_id: int,
@@ -161,6 +174,7 @@ def get_course_enrolled_students(
     ]
 
 
+# สร้างวิชาใหม่ (admin เท่านั้น) — 409 ถ้ารหัสวิชาซ้ำในหลักสูตรเดียวกัน
 @router.post("", response_model=CourseSchema, status_code=201)
 def create_course(
     payload: CourseCreateSchema,
@@ -181,6 +195,7 @@ def create_course(
     return course
 
 
+# แก้ไขวิชา (admin เท่านั้น)
 @router.put("/{course_id}", response_model=CourseSchema)
 def update_course(
     course_id: int,
@@ -205,6 +220,7 @@ def update_course(
     return course
 
 
+# ลบวิชา (admin เท่านั้น)
 @router.delete("/{course_id}", status_code=204)
 def delete_course(
     course_id: int,

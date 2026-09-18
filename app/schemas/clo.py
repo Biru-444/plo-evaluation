@@ -1,4 +1,5 @@
-"""Pydantic schemas for CLO"""
+"""Pydantic schemas for CLO — field ความหมายตรงกับ app/models/clo.py (pass_threshold_percent คือ
+เกณฑ์ผ่านที่ใช้ตัดสินทุกจุดคำนวณในระบบ)"""
 from __future__ import annotations
 
 from decimal import Decimal

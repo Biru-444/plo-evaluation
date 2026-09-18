@@ -56,6 +56,9 @@ class RosterParseError(Exception):
     """ไฟล์ไม่ตรงรูปแบบที่คาดไว้ - ส่งเป็น HTTP 400 กลับให้ผู้ใช้"""
 
 
+# ผลลัพธ์การ parse ไฟล์ .xls/.xlsx ของมหาวิทยาลัยแล้ว (ยังไม่บันทึกอะไรลงฐานข้อมูล) — ส่งต่อให้
+# _apply_roster_import ตัดสินใจว่าจะสร้าง/แก้ไขอะไรบ้าง (ทั้งโหมด dry-run และ commit ใช้ dataclass
+# เดียวกันนี้)
 @dataclass
 class ParsedRoster:
     course_code: str
@@ -189,6 +192,13 @@ def compute_year_level(cohort_year_2digit: int) -> int:
     return max(1, min(4, level))
 
 
+# ทำอะไร : อ่านไฟล์ดิบ (.xls/.xlsx) แล้วสแกนหาข้อมูลที่ต้องใช้ทั้งหมดด้วยการจับคู่ข้อความ/หัวคอลัมน์ที่
+# รู้จัก (ไม่อิงตำแหน่งแถว/คอลัมน์ตายตัว — ดูเหตุผลในหัว docstring ของไฟล์นี้): ภาคการศึกษา/ปีการศึกษา
+# (SEMESTER_RE), รหัสวิชา/ชื่อวิชา/section (COURSE_LINE_RE), รายชื่อผู้สอน (บรรทัดที่ขึ้นต้น "ผู้สอน"),
+# และตารางรายชื่อนักศึกษา (หาแถวหัวตารางที่มีทั้ง "เลขที่" และ "รหัสประจำตัว") รุ่นนักศึกษา
+# (cohort_year) เดาจาก 2 ตัวแรกของรหัสนักศึกษาที่พบมากที่สุดในไฟล์ (เผื่อมีนักศึกษาซ้ำชั้นปนมาบ้าง)
+# ถ้าแก้ : โยน RosterParseError (กลายเป็น HTTP 400) ทันทีที่หาข้อมูลที่จำเป็นไม่เจอ แทนที่จะเดาต่อแบบ
+# เงียบ ๆ เพื่อไม่ให้นำเข้าข้อมูลผิดโดยไม่รู้ตัว
 def parse_roster_xls(filename: str, content: bytes) -> ParsedRoster:
     rows = _load_rows(filename, content)
     rows = [row for row in rows if row]
@@ -279,6 +289,15 @@ def parse_roster_xls(filename: str, content: bytes) -> ParsedRoster:
     )
 
 
+# ทำอะไร : นำผล parse (ParsedRoster) ไปเทียบกับข้อมูลที่มีอยู่จริงในฐานข้อมูล แล้วตัดสินใจทีละส่วน
+# (ผู้สอน -> course_offering -> นักศึกษา -> การลงทะเบียน) ว่าแต่ละอย่าง "มีอยู่แล้ว"/"จะสร้างใหม่"/
+# "จะแก้ไข" — commit=False (dry-run) รันตรรกะเดียวกันทั้งหมดแต่ไม่ db.add()/ไม่ db.commit() จริง (แค่
+# คำนวณว่า "จะ" เกิดอะไรขึ้น) commit=True คือบันทึกจริงทุกอย่าง
+# เชื่อมกับ : ใช้ pg_insert().on_conflict_do_nothing() บันทึกการลงทะเบียนแบบ bulk เหมือน
+# enrollment.py (กันซ้ำแบบ atomic) — ทุก error ที่ไม่ถึงขั้นทำให้ import ทั้งไฟล์ล้มเหลว (เช่น
+# นักศึกษาคนหนึ่งอยู่คนละหลักสูตร) จะถูกเก็บใน errors/action="error" ต่อแถว ไม่ throw exception ทันที
+# ถ้าแก้ : ต้อง db.flush() นักศึกษาที่เพิ่ง add() ก่อน bulk insert enrollment เสมอ (ดูคอมเมนต์ในโค้ด
+# ด้านล่าง) ไม่งั้นจะชน foreign key constraint เพราะแถว student ยังไม่มีอยู่จริงในตาราง
 def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> RosterImportResponse:
     errors: list[str] = []
 

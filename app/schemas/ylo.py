@@ -1,4 +1,4 @@
-"""Pydantic schemas for YLO"""
+"""Pydantic schemas for YLO — field ความหมายตรงกับ app/models/ylo.py ทุกตัว"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

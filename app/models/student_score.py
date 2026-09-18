@@ -9,8 +9,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
+# คะแนนดิบที่นักศึกษา 1 คนได้ในชิ้นงาน 1 ชิ้น — ข้อมูลที่ละเอียดที่สุดในระบบ ทุกสูตรคำนวณ (CLO/PLO/YLO
+# mastery) ไล่ขึ้นมาจากตารางนี้ทั้งหมด ไม่มีแถวในตารางนี้ = ยังไม่มีคะแนนบันทึก (ไม่ใช่ได้ 0 คะแนนจริง)
 class StudentScore(Base):
     __tablename__ = "student_score"
+    # นักศึกษาคนเดียวมีคะแนนชิ้นงานเดียวกันซ้ำสองแถวไม่ได้ (แก้คะแนนคือ UPDATE แถวเดิม ไม่ใช่เพิ่มแถวใหม่)
     __table_args__ = (UniqueConstraint("item_id", "student_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -20,6 +23,8 @@ class StudentScore(Base):
     student_id: Mapped[str] = mapped_column(
         String(15), ForeignKey("student.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False
     )
+    # คะแนนดิบที่ได้จริง (ไม่ใช่ %) — ต้องหารด้วย AssessmentItem.total_score เองถึงจะได้ % (ดูสูตรใน
+    # plo_calculation.py._clo_mastery_for_student)
     score_obtained: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False)
 
     item: Mapped["AssessmentItem"] = relationship(back_populates="scores")

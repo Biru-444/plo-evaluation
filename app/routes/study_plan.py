@@ -1,4 +1,12 @@
-"""API routes for StudyPlan"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง study_plan (แผนการศึกษา — วิชาไหน
+         สอนชั้นปี/เทอมไหน)
+
+เชื่อมกับ : ข้อมูลจากตารางนี้ถูกอ่านโดย _study_plan_course_ids ใน ylo_calculation.py เพื่อตัดสินว่า
+            วิชาไหน "อยู่ในปีนี้" — แก้ปี/เทอมของวิชาที่นี่กระทบการคำนวณ YLO โดยตรง
+
+ถ้าแก้ : เฉพาะ admin เท่านั้นที่แก้ได้ — list/get เปิดให้ทุก role ดูได้
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +21,7 @@ from app.schemas import StudyPlanCreateSchema, StudyPlanSchema, StudyPlanUpdateS
 router = APIRouter(prefix="/study-plan", tags=["Study Plan"])
 
 
+# คืนรายการแผนการศึกษาทั้งหมด กรองตาม curriculum_id ได้
 @router.get("", response_model=list[StudyPlanSchema])
 def list_study_plan(
     curriculum_id: int | None = None,
@@ -25,6 +34,7 @@ def list_study_plan(
     return query.order_by(StudyPlan.id).all()
 
 
+# คืนแผนการศึกษารายตัวตาม id
 @router.get("/{study_plan_id}", response_model=StudyPlanSchema)
 def get_study_plan(
     study_plan_id: int,
@@ -37,6 +47,8 @@ def get_study_plan(
     return study_plan
 
 
+# สร้างแผนการศึกษาใหม่ (admin เท่านั้น) — 409 ถ้าซ้ำ (curriculum+course+cohort_year เดิม) หรืออ้าง
+# curriculum/course ที่ไม่มีจริง
 @router.post("", response_model=StudyPlanSchema, status_code=201)
 def create_study_plan(
     payload: StudyPlanCreateSchema,
@@ -57,6 +69,7 @@ def create_study_plan(
     return study_plan
 
 
+# แก้ไขแผนการศึกษา (admin เท่านั้น) — ส่งเฉพาะ field ที่ต้องการแก้ (exclude_unset)
 @router.put("/{study_plan_id}", response_model=StudyPlanSchema)
 def update_study_plan(
     study_plan_id: int,
@@ -78,6 +91,7 @@ def update_study_plan(
     return study_plan
 
 
+# ลบแผนการศึกษา (admin เท่านั้น)
 @router.delete("/{study_plan_id}", status_code=204)
 def delete_study_plan(
     study_plan_id: int,

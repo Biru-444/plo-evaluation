@@ -1,5 +1,13 @@
 """
-SQLAlchemy ORM Models for PLO Evaluation System
+ทำอะไร : รวม import ตาราง (model) ทั้งหมดของระบบไว้ที่เดียว เพื่อให้ไฟล์อื่นเขียน
+         `from app.models import Student, CLO, ...` ได้โดยไม่ต้องรู้ว่าแต่ละ model อยู่ไฟล์ไหน
+
+เชื่อมกับ : เรียงลำดับ import จากตารางที่ไม่มี foreign key ออกไปด้านนอก (user, curriculum) ไปจนถึง
+            ตารางที่พึ่งพาตารางอื่นเยอะที่สุด (student_score) — ลำดับนี้ไม่ได้มีผลต่อการทำงานจริง (ต่างจาก
+            ลำดับ include_router ใน app/main.py) แต่ช่วยให้อ่านไฟล์นี้แล้วเห็นภาพรวมความสัมพันธ์ของตาราง
+
+ถ้าแก้ : เพิ่ม model ใหม่ต้อง import ที่นี่และเติมใน __all__ ด้วย ไม่งั้นไฟล์อื่นจะ
+         `from app.models import ...` model นั้นไม่ได้
 """
 from .user import User
 from .curriculum import Curriculum

@@ -1,4 +1,14 @@
-"""API routes for PLO"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง plo (เป้าหมายการเรียนรู้ระดับ
+         หลักสูตร) บวก endpoint เสริม course-plan (ดูวิชาบังคับของ PLO นี้) — คนละไฟล์กับ
+         app/routes/plo_calculation.py ที่คำนวณ "% บรรลุ" (ไฟล์นี้จัดการแค่ข้อมูล PLO เอง)
+
+เชื่อมกับ : ลบ PLO ที่นี่จะ cascade ลบ ylo_plo_mapping และ course_plo ที่อ้างถึงไปด้วย (ดู
+            app/models/plo.py) กระทบทั้งการคำนวณ PLO และ YLO ที่ผูกกับ PLO นี้
+
+ถ้าแก้ : create/update/delete เฉพาะ admin เท่านั้น — list/get/course-plan เปิดให้ทุก role ดูได้ ลำดับ
+         การลงทะเบียน router นี้ใน app/main.py ต้องมาหลัง plo_calculation.router เสมอ (ดูคอมเมนต์ที่นั่น)
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +28,7 @@ from app.schemas import (
 router = APIRouter(prefix="/plo", tags=["PLO"])
 
 
+# คืนรายการ PLO ทั้งหมด กรองตาม curriculum_id ได้
 @router.get("", response_model=list[PLOSchema])
 def list_plo(
     curriculum_id: int | None = None,
@@ -30,6 +41,7 @@ def list_plo(
     return query.order_by(PLO.id).all()
 
 
+# คืน PLO รายตัวตาม id
 @router.get("/{plo_id}", response_model=PLOSchema)
 def get_plo(plo_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     plo = db.get(PLO, plo_id)
@@ -68,6 +80,7 @@ def get_plo_course_plan(
     ]
 
 
+# สร้าง PLO ใหม่ (admin เท่านั้น) — 409 ถ้ารหัส (code) ซ้ำในหลักสูตรเดียวกัน
 @router.post("", response_model=PLOSchema, status_code=201)
 def create_plo(
     payload: PLOCreateSchema,
@@ -85,6 +98,7 @@ def create_plo(
     return plo
 
 
+# แก้ไข PLO (admin เท่านั้น)
 @router.put("/{plo_id}", response_model=PLOSchema)
 def update_plo(
     plo_id: int,
@@ -106,6 +120,7 @@ def update_plo(
     return plo
 
 
+# ลบ PLO (admin เท่านั้น)
 @router.delete("/{plo_id}", status_code=204)
 def delete_plo(plo_id: int, db: Session = Depends(get_db), _=Depends(require_role("admin"))):
     plo = db.get(PLO, plo_id)

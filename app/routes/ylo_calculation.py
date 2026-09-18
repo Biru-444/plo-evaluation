@@ -1,28 +1,30 @@
 """
-YLO achievement calculation route.
+ทำอะไร : เส้นทาง API สำหรับคำนวณ "% บรรลุ YLO" (ผลลัพธ์การเรียนรู้ระดับชั้นปี) ของนักศึกษา ทั้งแบบ
+         รายรุ่นต่อชั้นปีเดียว (by-year) และรายบุคคลทุกปีพร้อมกัน (student) เป็นฟีเจอร์ที่เพิ่มเข้ามาใหม่
+         — ก่อนหน้านี้ระบบยังไม่มีการคำนวณ "% บรรลุ YLO" เลย (พบตอนสร้างหน้า "YLO ตามชั้นปี" ซึ่งเดิม
+         แสดงแค่ข้อความเป้าหมาย YLO เฉย ๆ) ไฟล์นี้ import _clo_passed จาก plo_calculation.py มาใช้ตรง ๆ
+         (ไม่ copy/แก้ไข) เพราะนิยาม "ผ่าน CLO" ต้องเหมือนกันทุกที่ในระบบ
 
-Brand-new feature - there was previously no "% บรรลุ YLO" calculation anywhere in
-this system (confirmed while building the "YLO ตามชั้นปี" page, which only showed
-the YLO goal text). Reuses _clo_passed from plo_calculation.py (imported, not
-duplicated or modified) since "passes a CLO" is defined identically everywhere.
+สูตรคำนวณ (ตาม spec ที่ยืนยันแล้ว) :
+  นักศึกษาจะ "บรรลุ YLO ปีที่ N" ของหลักสูตรหนึ่ง ๆ ก็ต่อเมื่อผ่านทุกวิชาที่เข้าเงื่อนไข 2 ข้อพร้อมกัน :
+    (ก) วิชานั้นถูก mark responsibility_level='primary' ใน course_plo กับ PLO ข้อใดข้อหนึ่งที่ YLO
+        นี้ถูก map ไว้ (ผ่าน ylo_plo_mapping — YLO 1 ปีมักถูก map กับหลาย PLO พร้อมกัน เงื่อนไขนี้คือ
+        union ของทุก PLO เหล่านั้น ไม่ใช่แค่ PLO เดียว) — ทุก CLO ของวิชานั้นนับรวมเท่ากันหมด ไม่มีการ
+        เลือกเฉพาะบาง CLO
+    (ข) วิชานั้นถูกกำหนดไว้ใน study_plan ให้สอนที่ year_level N ของหลักสูตรเดียวกัน (วิชาจากปีอื่นที่
+        บังเอิญแชร์ PLO เดียวกับ YLO นี้จะถูกตัดออก — เงื่อนไข (ข) นี่แหละที่กันวิชาปีอื่นไม่ให้หลุดเข้ามา)
+  "ผ่านวิชา" (สำหรับ YLO นี้) = ทุก CLO ของวิชานั้นผ่าน pass_threshold_percent ของตัวเอง (กฎผ่าน/ไม่ผ่าน
+  ต่อ CLO เดียวกับที่ใช้คำนวณ PLO)
+  YLO ที่ไม่มีวิชาเข้าเงื่อนไขเลย (ไม่มี PLO ที่ map ไว้ หรือไม่มีวิชาใน study_plan ปีนั้นตรงกับ PLO กลุ่ม
+  นี้เลย) จะถูกรายงานว่า "ยังไม่บรรลุ" — ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ กฎเดียวกับฝั่ง PLO
 
-Calculation (confirmed spec):
-  A student achieves YLO year N of a curriculum only if they pass EVERY course
-  that satisfies BOTH conditions at once:
-    (a) the course is marked responsibility_level='primary' in course_plo for
-        any PLO that this YLO is mapped to (via ylo_plo_mapping - a YLO is
-        usually mapped to several PLOs, this is a union across all of them,
-        not just one) - EVERY CLO belonging to that course counts, no
-        per-CLO opt-in/weighting
-    (b) the course is scheduled for year_level N in study_plan, for the same
-        curriculum (courses from other years that happen to share a PLO with
-        this YLO are excluded - condition (b) is what keeps them out)
-  "Passes a course" (for this YLO) = every one of that course's CLOs passes
-  its own pass_threshold_percent (same per-CLO pass/fail rule as the PLO
-  work).
-  A YLO with zero qualifying courses (no PLO mapped, or no study_plan course
-  for that year matches any of those PLOs) is reported as not achieved - no
-  data to judge from, not an automatic pass. Same rule as the PLO work.
+เชื่อมกับ : - อ่านจากตาราง course_plo, study_plan, ylo_plo_mapping, clo, item_clo, student_score
+            - GET /ylo/achievement/by-year ถูกเรียกจากหน้า "YLO ตามชั้นปี"
+            - GET /ylo/achievement/student ถูกเรียกจากหน้าผลบรรลุรายบุคคล (student-plo) สำหรับ
+              hierarchy รายวิชา -> YLO (รายปี) -> PLO
+
+ถ้าแก้ : แก้เงื่อนไข (ก)/(ข) หรือเกณฑ์ผ่าน CLO จะกระทบ % บรรลุ YLO ทั้งระบบทันที (ทั้งสอง endpoint
+         ในไฟล์นี้ใช้ตรรกะเดียวกัน)
 """
 from __future__ import annotations
 
@@ -55,12 +57,14 @@ from app.routes.plo_calculation import _clo_passed
 router = APIRouter(prefix="/ylo", tags=["YLO Achievement"])
 
 
+# ผลบรรลุ YLO ของนักศึกษา 1 คน (ใช้เป็นรายการย่อยใน YLOCohortAchievement.students)
 class YLOAchievementStudentItem(BaseModel):
     student_id: str
     student_name: str
     is_achieved: bool
 
 
+# ข้อมูลวิชา 1 วิชาที่สอนในชั้นปีนั้นตาม study_plan (ไม่จำกัดว่าต้องเกี่ยวกับ YLO นี้โดยตรง)
 class YLOCourseInfo(BaseModel):
     course_id: int
     course_code: str
@@ -79,6 +83,7 @@ class StudentYLOCourseItem(BaseModel):
     passed: bool
 
 
+# ผลบรรลุ YLO 1 ปีของนักศึกษา 1 คน พร้อมรายวิชาของปีนั้น — รายการย่อยใน StudentYLOAchievement.years
 class StudentYLOYearItem(BaseModel):
     year_level: int
     ylo_description: str
@@ -87,12 +92,14 @@ class StudentYLOYearItem(BaseModel):
     courses: list[StudentYLOCourseItem]
 
 
+# response ของ GET /ylo/achievement/student — ผลบรรลุ YLO ครบทั้ง 4 ปีของนักศึกษา 1 คน
 class StudentYLOAchievement(BaseModel):
     student_id: str
     curriculum_id: int
     years: list[StudentYLOYearItem]
 
 
+# response ของ GET /ylo/achievement/by-year — ผลบรรลุ YLO ปีเดียว ของนักศึกษาทั้งรุ่น
 class YLOCohortAchievement(BaseModel):
     ylo_id: int
     curriculum_id: int
@@ -113,10 +120,16 @@ class YLOCohortAchievement(BaseModel):
 def _study_plan_course_ids(
     db: Session, curriculum_id: int, year_level: int, cohort_year: int | None
 ) -> set[int]:
-    """Cohort-specific study_plan rows win if any exist for this exact cohort_year,
-    else fall back to the standard plan (cohort_year IS NULL). Real data in this
-    system currently only has standard-plan rows, but this keeps the behavior
-    correct if per-cohort overrides get added later."""
+    """
+    ทำอะไร : หารายชื่อวิชาที่สอนในปี year_level ของหลักสูตรนี้ตาม study_plan — ถ้ามี study_plan ที่
+             เจาะจงรุ่น (cohort_year) นี้อยู่จริง จะใช้ชุดนั้นก่อน ถ้าไม่มีจะ fallback ไปใช้แผนมาตรฐาน
+             (cohort_year เป็น NULL)
+
+    เชื่อมกับ : ใช้โดย _year_courses และ _build_ylo_requirements ในการหาวิชาของแต่ละชั้นปี
+
+    ถ้าแก้ : ข้อมูลจริงในระบบตอนนี้มีแต่แถว "แผนมาตรฐาน" (cohort_year เป็น NULL) เท่านั้น แต่โค้ดนี้
+             เขียนรองรับไว้ล่วงหน้า ถ้ามีการเพิ่มแผนเฉพาะรุ่นภายหลังจะยังทำงานถูกต้อง
+    """
     if cohort_year is not None:
         cohort_specific = {
             row[0]
@@ -143,10 +156,16 @@ def _study_plan_course_ids(
 
 
 def _year_courses(db: Session, curriculum_id: int, year_level: int, cohort_year: int | None) -> list[YLOCourseInfo]:
-    """All courses scheduled for this year_level per study_plan, sorted by
-    course_code - "what's taught this year", independent of which of them
-    happen to feed into this particular YLO's PLO group (see the docstring
-    on the `courses` field)."""
+    """
+    ทำอะไร : คืนวิชาทั้งหมดที่ถูกกำหนดสอนในปี year_level ตาม study_plan เรียงตาม course_code — ตอบ
+             คำถาม "ปีนี้เรียนอะไรบ้าง" ทั้งหมด ไม่ใช่แค่วิชาที่เกี่ยวข้องกับ PLO กลุ่มของ YLO นี้
+             โดยเฉพาะ (ดู field `courses` ใน YLOCohortAchievement)
+
+    เชื่อมกับ : เรียก _study_plan_course_ids — ใช้แสดงรายวิชาของปีในหน้า "YLO ตามชั้นปี" และ
+                หน้าผลบรรลุรายบุคคล
+
+    ถ้าแก้ : คืน [] ถ้าไม่มีวิชาเลยในปีนั้น (ไม่ error)
+    """
     course_ids = _study_plan_course_ids(db, curriculum_id, year_level, cohort_year)
     if not course_ids:
         return []
@@ -167,12 +186,20 @@ def _year_courses(db: Session, curriculum_id: int, year_level: int, cohort_year:
 def _build_ylo_requirements(
     db: Session, ylo: YLO, cohort_year: int | None
 ) -> dict[int, set[int]]:
-    """course_id -> set of ALL of that course's CLO ids, for every course that
-    is marked responsibility_level='primary' (course_plo) for any PLO in this
-    YLO's PLO group AND belongs to a course scheduled for this YLO's
-    year_level. Both condition (a) (PLO group membership) and (b) (year match)
-    are applied here together, so a course from a different year never leaks
-    in even if it shares a PLO with this YLO."""
+    """
+    ทำอะไร : สร้างตาราง course_id -> เซตของ CLO id ทั้งหมดของวิชานั้น เฉพาะวิชาที่ถูก mark
+             responsibility_level='primary' (course_plo) กับ PLO ข้อใดข้อหนึ่งในกลุ่ม PLO ของ YLO
+             นี้ "และ" อยู่ในวิชาที่กำหนดสอนที่ year_level ของ YLO นี้ด้วย — ใช้ทั้งเงื่อนไข (ก) และ
+             (ข) จากคอมเมนต์หัวไฟล์พร้อมกัน ทำให้วิชาจากปีอื่นไม่มีทางหลุดเข้ามาแม้จะแชร์ PLO กับ YLO
+             นี้ก็ตาม
+
+    เชื่อมกับ : อ่านจาก ylo_plo_mapping (หา PLO กลุ่มของ YLO นี้), _study_plan_course_ids (หาวิชาของปี
+                นี้), course_plo, clo — ถูกเรียกโดย get_ylo_achievement และ
+                get_student_ylo_achievement
+
+    ถ้าแก้ : เป็นจุดกำหนด "วิชาบังคับของ YLO นี้" ทั้งหมด แก้เงื่อนไข (ก)/(ข) ที่นี่กระทบผลบรรลุ YLO
+             โดยตรง
+    """
     plo_ids = {
         row[0]
         for row in db.query(YLOPLOMapping.plo_id).filter(YLOPLOMapping.ylo_id == ylo.id).all()
@@ -205,10 +232,18 @@ def _build_ylo_requirements(
 
 
 def _clo_mastery_for_student(db: Session, student_id: str) -> dict[int, Decimal]:
-    """Same weighted-average-per-CLO formula as plo_calculation.py/clo_calculation.py,
-    computed across all of the student's enrollments (not scoped to any one
-    course) - duplicated here on purpose rather than importing a private helper
-    out of plo_calculation.py, so that file stays untouched."""
+    """
+    ทำอะไร : คำนวณระดับความเชี่ยวชาญ (mastery) ต่อ CLO ของนักศึกษา 1 คน ด้วยสูตรค่าเฉลี่ยถ่วงน้ำหนัก
+             เดียวกับ plo_calculation.py/clo_calculation.py คำนวณจากทุกวิชาที่ลงทะเบียนทั้งหมด (ไม่จำกัด
+             เฉพาะวิชาใดวิชาหนึ่ง)
+
+    เชื่อมกับ : จงใจ "เขียนซ้ำ" สูตรนี้ในไฟล์นี้ แทนที่จะ import ฟังก์ชัน private ข้ามไฟล์จาก
+                plo_calculation.py เพื่อให้ไฟล์นั้นไม่ต้องถูกแก้เพื่อ export อะไรเพิ่ม — เรียกโดย
+                get_ylo_achievement และ get_student_ylo_achievement
+
+    ถ้าแก้ : ถ้าแก้สูตรตรงนี้ ต้องแก้ _clo_mastery_for_student ใน plo_calculation.py ให้ตรงกันด้วย
+             ไม่งั้นผลบรรลุ PLO กับ YLO จะคำนวณ mastery ไม่ตรงกัน
+    """
     offering_ids = [
         row[0]
         for row in db.query(Enrollment.offering_id).filter(Enrollment.student_id == student_id).all()
@@ -235,8 +270,11 @@ def _clo_mastery_for_student(db: Session, student_id: str) -> dict[int, Decimal]
     for ic in item_clos:
         score = score_by_item.get(ic.item_id)
         item = item_by_id.get(ic.item_id)
+        # ข้ามชิ้นงานที่ยังไม่มีคะแนน หรือคะแนนเต็มเป็น 0 (หารไม่ได้)
         if score is None or item is None or item.total_score <= 0:
             continue
+        # แปลงคะแนนดิบเป็น % แล้วถ่วงน้ำหนักด้วย weight_percent สะสมแยกตาม CLO (สูตรเดียวกับ
+        # plo_calculation.py._clo_mastery_for_student)
         item_percent = (score / item.total_score) * Decimal(100)
         clo_weighted_sum[ic.clo_id] = clo_weighted_sum.get(ic.clo_id, Decimal(0)) + item_percent * ic.weight_percent
         clo_weight_total[ic.clo_id] = clo_weight_total.get(ic.clo_id, Decimal(0)) + ic.weight_percent
@@ -249,6 +287,13 @@ def _clo_mastery_for_student(db: Session, student_id: str) -> dict[int, Decimal]
 
 
 def _clo_pass_thresholds(db: Session, clo_ids: set[int]) -> dict[int, Decimal]:
+    """
+    ทำอะไร : ดึงเกณฑ์ผ่าน (pass_threshold_percent) ของ CLO ที่ขอมา คืนเป็น {clo_id: threshold}
+
+    เชื่อมกับ : ใช้คู่กับผลจาก _build_ylo_requirements ก่อนเรียก _student_achieved_ylo
+
+    ถ้าแก้ : คืน dict ว่างถ้า clo_ids ว่างเปล่า (ไม่ query เปล่า ๆ)
+    """
     if not clo_ids:
         return {}
     return {c.id: c.pass_threshold_percent for c in db.query(CLO).filter(CLO.id.in_(clo_ids)).all()}
@@ -259,6 +304,16 @@ def _student_achieved_ylo(
     clo_mastery: dict[int, Decimal],
     clo_pass_thresholds: dict[int, Decimal],
 ) -> bool:
+    """
+    ทำอะไร : ตัดสินว่านักศึกษา "บรรลุ YLO" ปีนี้หรือไม่ — บรรลุก็ต่อเมื่อผ่านทุกวิชาบังคับ (จาก
+             _build_ylo_requirements) โดยแต่ละวิชาต้องผ่านทุก CLO ของตัวเอง YLO ที่ไม่มีวิชาบังคับเลย
+             ถือว่า "ยังไม่บรรลุ" (ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ)
+
+    เชื่อมกับ : เรียก _clo_passed (import จาก plo_calculation.py) ทีละ CLO — ใช้โดย
+                get_ylo_achievement และ get_student_ylo_achievement
+
+    ถ้าแก้ : เป็นจุดตัดสินใจหลักของผลบรรลุ YLO ทั้งระบบ
+    """
     if not requirements:
         return False
     return all(
@@ -275,6 +330,18 @@ def get_ylo_achievement(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    ทำอะไร : endpoint หลักของหน้า "YLO ตามชั้นปี" — คืนผลบรรลุ YLO ของชั้นปีหนึ่ง (year_level) สำหรับ
+             นักศึกษาทั้งรุ่นที่เรียนถึงปีนั้นแล้ว พร้อมรายวิชาของปีนั้น กรองตามรุ่น (cohort_year) ได้
+
+    เชื่อมกับ : ใช้ _build_ylo_requirements + _clo_mastery_for_student (คำนวณทีละคนในลูป ไม่ได้ batch
+                เหมือนฝั่ง PLO — ดู "ถ้าแก้" ด้านล่าง) และ _year_courses — เรียกโดยหน้า "YLO ตามชั้นปี"
+
+    ถ้าแก้ : เฉพาะนักศึกษาที่ current_year_level >= year_level ที่ขอเท่านั้นถึงจะถูกนับ (คนที่ยังเรียน
+             ไม่ถึงปีนี้ยังไม่มีโอกาสสอบวิชาที่กำหนด YLO ปีนี้ ไม่ควรถูกนับเป็น "ไม่บรรลุ") ฟังก์ชันนี้
+             วน query mastery ทีละนักศึกษาในลูป (ไม่ batch เหมือน plo_calculation.py) — ถ้า roster
+             ใหญ่ขึ้นมากในอนาคต อาจต้องปรับให้ batch แบบเดียวกันเพื่อความเร็ว
+    """
     curriculum = db.get(Curriculum, curriculum_id)
     if curriculum is None:
         raise HTTPException(status_code=404, detail="Curriculum not found")
@@ -375,11 +442,20 @@ def get_student_ylo_achievement(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """เวอร์ชันรายบุคคลของ /achievement/by-year - แทนที่จะเป็น "ปีเดียว ทุกคน" เป็น "ทุกปี คนเดียว" ใช้
-    ในหน้ารายละเอียดนักศึกษา (student-plo) สำหรับ hierarchy รายวิชา -> YLO (รายปี) -> PLO เรียก
-    _build_ylo_requirements/_student_achieved_ylo/_year_courses ชุดเดียวกับ /achievement/by-year
-    เพื่อให้ตัดสิน "บรรลุ YLO" ตรงกันทุกที่ - ผ่าน/ไม่ผ่านรายวิชา (ต่างจากที่ใช้ตัดสิน YLO ตรงที่นับ CLO
-    ทุกตัวของวิชานั้น ไม่ใช่แค่ตัวที่เกี่ยวกับ PLO กลุ่มของ YLO นี้) คำนวณแยกเป็นของตัวเอง"""
+    """
+    ทำอะไร : เวอร์ชันรายบุคคลของ /achievement/by-year — แทนที่จะเป็น "ปีเดียว ทุกคน" กลายเป็น
+             "ทุกปี คนเดียว" คืนผลบรรลุ YLO ครบทั้ง 4 ปีของนักศึกษา 1 คน พร้อมรายวิชาและสถานะผ่าน/
+             ไม่ผ่านของแต่ละวิชาในแต่ละปี
+
+    เชื่อมกับ : ใช้ในหน้ารายละเอียดนักศึกษา (student-plo) สำหรับ hierarchy รายวิชา -> YLO (รายปี) ->
+                PLO เรียก _build_ylo_requirements / _student_achieved_ylo / _year_courses ชุดเดียวกับ
+                /achievement/by-year เพื่อให้ตัดสิน "บรรลุ YLO" ตรงกันทุกที่
+
+    ถ้าแก้ : สถานะผ่าน/ไม่ผ่าน "รายวิชา" ที่แสดงในนี้ (course_items) คำนวณแยกจาก is_achieved ของ YLO
+             — นับ CLO ทุกตัวของวิชานั้นทั้งหมด ไม่ใช่แค่ CLO ที่เกี่ยวกับ PLO กลุ่มของ YLO ปีนั้น (ต่างจาก
+             requirements ที่ใช้ตัดสิน is_achieved ของ YLO) ตั้งใจแยกเพราะ "วิชานี้ผ่านไหม" ในมุมมอง
+             ทั่วไปของนักศึกษา ควรตอบคำถาม "ผ่านทุก CLO ของวิชา" ไม่ใช่แค่ CLO ที่เกี่ยวกับ YLO เดียว
+    """
     student = db.get(Student, student_id)
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")

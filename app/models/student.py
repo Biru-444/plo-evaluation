@@ -7,19 +7,30 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
+# นักศึกษา — ไม่มีบัญชี login เป็นของตัวเอง (ต่างจาก User) id คือรหัสนักศึกษาจริง (string ความยาวคงที่
+# เช่น "660112230001") ใช้เป็น primary key ตรง ๆ ไม่มี id แยกต่างหาก
 class Student(Base):
     __tablename__ = "student"
 
     id: Mapped[str] = mapped_column(String(15), primary_key=True)
+    # ลบหลักสูตรที่ยังมีนักศึกษาอยู่ไม่ได้ (RESTRICT) — ต่างจากตารางอื่นที่ใช้ CASCADE เพราะข้อมูล
+    # นักศึกษาสำคัญเกินกว่าจะให้หายไปเงียบ ๆ ตามหลักสูตรที่ถูกลบ
     curriculum_id: Mapped[int] = mapped_column(
         ForeignKey("curriculum.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=False
     )
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     title: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # สถานะการเป็นนักศึกษา (เช่น "กำลังศึกษา", "จบการศึกษา", "พ้นสภาพ", "ลาพัก") — เป็น free text ไม่ใช่
+    # enum ระดับฐานข้อมูล ค่าเริ่มต้น "กำลังศึกษา"
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="กำลังศึกษา")
+    # หมู่เรียน (เช่น "01", "02") — คนละความหมายกับ CourseOffering.section (ของวิชา) นี่คือหมู่ของ
+    # นักศึกษาทั้งรุ่น ใช้กรองหน้ารายชื่อนักศึกษา
     section: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # ปีที่เข้าเรียน (เช่น 66) — คงที่ตลอดที่เรียน ต่างจาก current_year_level ที่ขยับทุกปี
     cohort_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ชั้นปีที่เรียนอยู่ตอนนี้ (1-4) — ใช้ตัดสินว่านักศึกษาคนนี้ "เรียนถึง" YLO ปีไหนแล้ว (ดู
+    # ylo_calculation.py) ต้องอัปเดตเองทุกปีการศึกษา ไม่ได้คำนวณอัตโนมัติจาก cohort_year
     current_year_level: Mapped[int] = mapped_column(Integer, nullable=False)
 
     curriculum: Mapped["Curriculum"] = relationship(back_populates="students")

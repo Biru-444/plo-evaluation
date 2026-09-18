@@ -31,6 +31,11 @@ from app.models import (
 def test_by_year_excludes_students_who_have_not_reached_that_year_level(
     client, db_session, admin_user
 ):
+    """เทสหลักของไฟล์นี้ (regression test ของบั๊กที่ user แจ้งมา - ดู docstring หัวไฟล์) - สร้าง
+    นักศึกษา 2 คนในหลักสูตรเดียวกัน (ปี 1 กับปี 3) แล้วขอ /ylo/achievement/by-year?year_level=3
+    ถ้า fail แปลว่า endpoint กลับไปนับนักศึกษาที่ current_year_level ยังไม่ถึง year_level ที่ขอปนเข้า
+    มาในตัวเลขสรุป (total_students/achieved_student_count/achieved_rate_percent) และ/หรือ students
+    list อีกครั้ง"""
     curriculum = Curriculum(name="Test Curriculum YLO", year=2569)
     db_session.add(curriculum)
     db_session.flush()
@@ -103,6 +108,9 @@ def test_by_year_excludes_students_who_have_not_reached_that_year_level(
     db_session.flush()
 
     db_session.add(ItemCLO(item_id=item.id, clo_id=clo.id, weight_percent=100.00))
+    # นักศึกษาปี 3 ได้ 90/100 = 90% >= เกณฑ์ 60% -> ผ่าน CLO -> ผ่านวิชาบังคับของ YLO ปี 3 -> บรรลุ YLO
+    # (นักศึกษาปี 1 ไม่มีคะแนนเลยเพราะไม่ได้ลงทะเบียนวิชานี้ด้วย - แค่กัน current_year_level อย่างเดียว
+    # ก็ต้องพอที่จะตัดออกจากผลลัพธ์แล้ว ไม่ต้องพึ่งว่าไม่มีคะแนน)
     db_session.add(StudentScore(item_id=item.id, student_id=student_year3.id, score_obtained=90.0))
     db_session.commit()
 

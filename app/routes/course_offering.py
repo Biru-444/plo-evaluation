@@ -1,4 +1,13 @@
-"""API routes for CourseOffering"""
+"""
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course_offering (การเปิดสอนจริง)
+         บวก endpoint จับจอง/ปล่อยคืนวิชาสำหรับอาจารย์ (claim/release)
+
+เชื่อมกับ : list_course_offerings รับ filter unassigned=True เพื่อหาวิชาที่ยังไม่มีผู้สอน (ใช้ในหน้า
+            ให้อาจารย์เลือกจับจอง) — claim/release ใช้ atomic UPDATE กันปัญหาสองคนจับจองพร้อมกัน (ดู
+            docstring ของ claim_course_offering ด้านล่าง)
+
+ถ้าแก้ : create/update/delete เฉพาะ admin — claim/release เปิดให้ instructor ทำเองได้ (ไม่ต้อง admin)
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +27,7 @@ from app.schemas import (
 router = APIRouter(prefix="/course-offerings", tags=["Course Offerings"])
 
 
+# คืนรายการ offering ทั้งหมด กรองตาม course_id / instructor_id / unassigned (ยังไม่มีผู้สอน) ได้
 @router.get("", response_model=list[CourseOfferingSchema])
 def list_course_offerings(
     course_id: int | None = None,
@@ -36,6 +46,7 @@ def list_course_offerings(
     return query.order_by(CourseOffering.id).all()
 
 
+# คืน offering รายตัวตาม id
 @router.get("/{offering_id}", response_model=CourseOfferingSchema)
 def get_course_offering(
     offering_id: int,
@@ -48,6 +59,7 @@ def get_course_offering(
     return offering
 
 
+# สร้าง offering ใหม่ (admin เท่านั้น) — instructor_id ใส่หรือเว้นว่างไว้ก็ได้ (ดู model)
 @router.post("", response_model=CourseOfferingSchema, status_code=201)
 def create_course_offering(
     payload: CourseOfferingCreateSchema,
@@ -68,6 +80,7 @@ def create_course_offering(
     return offering
 
 
+# แก้ไข offering (admin เท่านั้น) — รวมถึงมอบหมาย/เปลี่ยนผู้สอนโดยตรงได้ (ไม่ต้องผ่าน claim/release)
 @router.put("/{offering_id}", response_model=CourseOfferingSchema)
 def update_course_offering(
     offering_id: int,
@@ -91,6 +104,7 @@ def update_course_offering(
     return offering
 
 
+# ลบ offering (admin เท่านั้น)
 @router.delete("/{offering_id}", status_code=204)
 def delete_course_offering(
     offering_id: int,

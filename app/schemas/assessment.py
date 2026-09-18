@@ -1,4 +1,5 @@
-"""Pydantic schemas for AssessmentItem and StudentScore"""
+"""Pydantic schemas for AssessmentItem and StudentScore — field ความหมายตรงกับ app/models/assessment.py
+และ app/models/student_score.py"""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -56,6 +57,8 @@ class StudentScoreCreateSchema(BaseModel):
     score_obtained: int = Field(ge=0)
 
 
+# StudentScoreSchema + ชื่อ/คะแนนเต็มของชิ้นงานนั้นรวมมาให้ในตัวเดียว (join กับ AssessmentItem แล้ว)
+# ใช้แสดงตารางคะแนนนักศึกษา 1 คนโดยไม่ต้อง query AssessmentItem แยกอีกรอบ
 class StudentScoreDetailSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -350,6 +350,9 @@ def test_secondary_course_plo_excluded_same_as_null(client, db_session, admin_us
 
 
 def test_invalid_plo_id_returns_404(client, db_session):
+    """ส่ง plo_id ที่ไม่มีอยู่จริงมาเป็น query param - ต้อง 404 ทันที (ไม่ใช่ 200 พร้อม
+    plo_achieved เป็น null ทุกคนอย่างเงียบๆ) เพื่อให้ frontend รู้ชัดว่าเรียกผิดพลาด ไม่ใช่วิชานี้
+    ไม่มีข้อมูลให้ประเมินจริง"""
     fx = _make_base_fixtures(db_session)
     db_session.commit()
 
