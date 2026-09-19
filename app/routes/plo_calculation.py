@@ -9,29 +9,32 @@
      clo_calculation.py) — CLO ที่นักศึกษาไม่มีคะแนนบันทึกไว้เลยจะไม่มีค่า mastery
   2. CLO จะ "ผ่าน" ก็ต่อเมื่อ mastery >= pass_threshold_percent ของ CLO นั้นเอง (กำหนดแยกได้ต่อ CLO
      ไม่ใช่ค่าคงที่ตายตัวทั้งระบบ) ไม่มีค่า mastery = ไม่ผ่าน
-  3. สำหรับ PLO ข้อหนึ่ง ๆ ทุกวิชาที่ถูก mark responsibility_level='primary' ไว้กับ PLO นั้นใน
-     course_plo (ตาราง mapping ตามที่ออกแบบไว้ในหลักสูตร/มคอ.2) ถือเป็นวิชา "บังคับ" สำหรับ PLO นั้น
-     — ทุก CLO ของวิชานั้นนับรวมเท่ากันหมด (ไม่มีการเลือกเฉพาะบาง CLO หรือถ่วงน้ำหนักต่างกัน ถือว่า
-     ทุก CLO ของวิชา primary เกี่ยวข้องกับทุก PLO ที่วิชานั้นถูก mark primary ไว้) นักศึกษาจะ "ผ่าน
-     วิชาบังคับของ PLO นี้" ก็ต่อเมื่อผ่านทุก CLO ของวิชานั้น — รายชื่อวิชาบังคับหาได้จาก course_plo
-     โดยตรง ไม่ขึ้นกับว่านักศึกษาคนนั้นลงทะเบียนวิชานั้นจริงหรือไม่
-  4. นักศึกษาจะ "บรรลุ PLO" ก็ต่อเมื่อผ่านวิชาบังคับ "ทุกวิชา" ของ PLO นั้น — PLO ที่ไม่มีวิชาบังคับ
+  3. สำหรับ PLO ข้อหนึ่ง ๆ CLO ที่มีแถวใน clo_plo_mapping ผูกกับ PLO นั้นโดยตรง (ตาม มคอ.3 ของแต่ละ
+     วิชา — 1 CLO ผูกได้กับหลาย PLO และแต่ละ CLO ของวิชาเดียวกันไม่จำเป็นต้องผูกกับ PLO ชุดเดียวกัน)
+     ถือเป็นหลักฐานของ PLO นั้น จัดกลุ่มตามวิชาที่ CLO นั้นสังกัดอยู่ นักศึกษาจะ "ผ่านวิชาสำหรับ PLO
+     นี้" ก็ต่อเมื่อผ่านทุก CLO ของวิชานั้นที่ถูกผูกกับ PLO นี้ (ไม่ใช่ทุก CLO ของวิชา — วิชาเดียวกันอาจมี
+     CLO ที่ผูกกับ PLO อื่นซึ่งไม่เกี่ยวกับ PLO นี้เลย) — รายชื่อวิชา/CLO ที่เกี่ยวข้องหาได้จาก
+     clo_plo_mapping โดยตรง ไม่ขึ้นกับว่านักศึกษาคนนั้นลงทะเบียนวิชานั้นจริงหรือไม่
+  4. นักศึกษาจะ "บรรลุ PLO" ก็ต่อเมื่อผ่านทุกวิชาที่มี CLO ผูกกับ PLO นั้น — PLO ที่ไม่มี CLO ผูกอยู่
      เลยจะถูกรายงานว่า "ยังไม่บรรลุ" (ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ)
   achieved_percent เป็น 100.0/0.0 เสมอ (สะท้อนค่า is_achieved ตรง ๆ) ไม่ใช่ตัวเลขบางส่วน เพราะโมเดลนี้
   ไม่มีแนวคิด "บรรลุบางส่วน" อีกต่อไป
 
-เชื่อมกับ : - อ่าน/เขียนผ่านตาราง course_plo, course, clo, item_clo, assessment_item, student_score
-              ในฐานข้อมูล PostgreSQL
+เชื่อมกับ : - อ่าน/เขียนผ่านตาราง clo_plo_mapping, course, clo, item_clo, assessment_item,
+              student_score ในฐานข้อมูล PostgreSQL (course_plo ไม่ได้ใช้คำนวณตรงนี้แล้ว — ยังเก็บไว้
+              ใช้แสดง Curriculum Mapping ระดับหลักสูตรเท่านั้น ดู app/routes/course_plo.py)
             - GET /plo/achievement ถูกเรียกจากหน้าผลบรรลุรายบุคคล (student-plo / PLOAchievement.jsx)
             - GET /plo/achievement/cohort ถูกเรียกจากหน้า "ภาพรวม PLO" (PLODetailPage.jsx)
             - GET /plo/achievement/by-year ถูกเรียกจากหน้า "YLO ตามชั้นปี" (สำหรับ course_count
               ต่อปี — ตัวเลข achievement ของ endpoint นี้เองยังไม่ถูกแสดงผลที่ไหนใน UI ปัจจุบัน)
-            - ylo_calculation.py import _clo_passed จากไฟล์นี้ไปใช้ตัดสิน "ผ่าน CLO" แบบเดียวกัน
+            - ylo_calculation.py ยังใช้ course_plo ของตัวเอง (_build_ylo_requirements) ไม่ได้เปลี่ยน
+              ตาม — import แค่ _clo_passed จากไฟล์นี้ไปใช้ตัดสิน "ผ่าน CLO" แบบเดียวกัน
 
-ถ้าแก้ : แก้สูตรในไฟล์นี้ (โดยเฉพาะเงื่อนไข 'primary' หรือเกณฑ์ผ่าน CLO) จะกระทบ % บรรลุ PLO ทั้งระบบ
-         ทันที (หน้าภาพรวม PLO, YLO ตามชั้นปี, ผลบรรลุรายบุคคล) รวมถึงทำให้ผลของ
-         tests/test_plo_achievement_cohort.py เปลี่ยนไปด้วย ลำดับการลงทะเบียน router ของไฟล์นี้ใน
-         app/main.py ก็มีผลต่อการทำงาน (ดูคอมเมนต์ใน main.py) ห้ามสลับลำดับ
+ถ้าแก้ : แก้สูตรในไฟล์นี้ (โดยเฉพาะที่มาของ CLO ที่นับเป็นหลักฐานของ PLO หรือเกณฑ์ผ่าน CLO) จะกระทบ
+         % บรรลุ PLO ทั้งระบบทันที (หน้าภาพรวม PLO, ผลบรรลุรายบุคคล, /courses/{id}/enrolled-students
+         ?plo_id=) รวมถึงทำให้ผลของ tests/test_plo_achievement_cohort.py และ
+         tests/test_courses_enrolled_students_mastery.py เปลี่ยนไปด้วย ลำดับการลงทะเบียน router ของ
+         ไฟล์นี้ใน app/main.py ก็มีผลต่อการทำงาน (ดูคอมเมนต์ใน main.py) ห้ามสลับลำดับ
 """
 from __future__ import annotations
 
@@ -45,9 +48,9 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     CLO,
+    CLOPLOMapping,
     Course,
     CourseOffering,
-    CoursePLO,
     Curriculum,
     Enrollment,
     AssessmentItem,
@@ -152,24 +155,25 @@ def _build_plo_requirements(
     db: Session, curriculum_id: int
 ) -> tuple[dict[int, dict[int, set[int]]], dict[int, Decimal]]:
     """
-    ทำอะไร : สร้างตาราง "PLO แต่ละข้อ ต้องผ่านวิชาไหนบ้าง และวิชานั้นมี CLO อะไรบ้าง" คำนวณต่อหลักสูตร
-             เพียงครั้งเดียว (ไม่ใช่ต่อนักศึกษา) แล้วนำผลไปใช้ซ้ำกับนักศึกษาทุกคนในรุ่น เพื่อลดจำนวน query
-             คืนค่าเป็น 2 ตัว : plo_requirements[plo_id][course_id] = เซตของ CLO id ทั้งหมดของวิชานั้น
-             (ทุก CLO ของวิชาที่ผูกแบบ primary นับรวมเท่ากันหมด ไม่มีการเลือกเฉพาะบาง CLO), และ
+    ทำอะไร : สร้างตาราง "PLO แต่ละข้อ มี CLO อะไรบ้างเป็นหลักฐาน และ CLO เหล่านั้นสังกัดวิชาไหน" คำนวณ
+             ต่อหลักสูตรเพียงครั้งเดียว (ไม่ใช่ต่อนักศึกษา) แล้วนำผลไปใช้ซ้ำกับนักศึกษาทุกคนในรุ่น เพื่อลด
+             จำนวน query คืนค่าเป็น 2 ตัว : plo_requirements[plo_id][course_id] = เซตของ CLO id ที่ถูก
+             ผูกกับ PLO นั้นโดยตรง (ผ่าน clo_plo_mapping) และสังกัดวิชานั้น (อาจเป็นแค่บางส่วนของ CLO
+             ทั้งหมดในวิชา ไม่ใช่ทุก CLO เสมอไป — วิชาเดียวกันอาจมี CLO ที่ผูกกับ PLO อื่นแยกกัน), และ
              clo_pass_thresholds[clo_id] = เกณฑ์ผ่านของ CLO นั้น
 
-    เชื่อมกับ : - อ่านจากตาราง course_plo, course, clo — กรองเฉพาะ responsibility_level='primary'
-                  เท่านั้น (วิชาที่เป็นแค่ 'secondary' หรือไม่มี course_plo ผูกกับ PLO นี้เลย ไม่นับเป็น
-                  วิชาบังคับ)
-                - ถูกเรียกจากทุก endpoint ในไฟล์นี้ที่ต้องคำนวณผลบรรลุ PLO
+    เชื่อมกับ : - อ่านจากตาราง clo_plo_mapping, clo, course — กรองเฉพาะ CLO ของวิชาที่อยู่ในหลักสูตรนี้
+                  เท่านั้น (course_plo ไม่ได้ใช้ตรงนี้แล้ว — ดูโมดูล docstring ด้านบน)
+                - ถูกเรียกจากทุก endpoint ในไฟล์นี้ที่ต้องคำนวณผลบรรลุ PLO รวมถึง
+                  courses.py::get_course_enrolled_students (?plo_id=)
 
-    ถ้าแก้ : เปลี่ยนเงื่อนไข 'primary' เป็นอย่างอื่น จะทำให้ % บรรลุ PLO เปลี่ยนทั้งระบบทันที
+    ถ้าแก้ : เปลี่ยนที่มาของ CLO ที่นับเป็นหลักฐานตรงนี้ จะทำให้ % บรรลุ PLO เปลี่ยนทั้งระบบทันที
     """
     rows = (
-        db.query(CoursePLO.plo_id, CLO.course_id, CLO.id, CLO.pass_threshold_percent)
-        .join(Course, Course.id == CoursePLO.course_id)
-        .join(CLO, CLO.course_id == CoursePLO.course_id)
-        .filter(Course.curriculum_id == curriculum_id, CoursePLO.responsibility_level == "primary")
+        db.query(CLOPLOMapping.plo_id, CLO.course_id, CLO.id, CLO.pass_threshold_percent)
+        .join(CLO, CLO.id == CLOPLOMapping.clo_id)
+        .join(Course, Course.id == CLO.course_id)
+        .filter(Course.curriculum_id == curriculum_id)
         .all()
     )
     plo_requirements: dict[int, dict[int, set[int]]] = {}
@@ -182,17 +186,17 @@ def _build_plo_requirements(
 
 def _qualifying_plo_ids(plo_requirements: dict[int, dict[int, set[int]]]) -> set[int]:
     """
-    ทำอะไร : หา PLO ที่มีวิชา "หลัก" อย่างน้อย 1 วิชาผ่านเกณฑ์การคำนวณ (คือมี key อยู่ใน
-             plo_requirements เลย — _build_plo_requirements ใส่ key เฉพาะ plo_id ที่เจอวิชาที่เข้า
-             เงื่อนไขจริงเท่านั้น)
+    ทำอะไร : หา PLO ที่มี CLO ผูกอยู่อย่างน้อย 1 ตัวผ่านเกณฑ์การคำนวณ (คือมี key อยู่ใน
+             plo_requirements เลย — _build_plo_requirements ใส่ key เฉพาะ plo_id ที่เจอ clo_plo_mapping
+             จริงเท่านั้น)
 
     เชื่อมกับ : ใช้ตัดสินว่า PLO ข้อไหนควรถูกนับเป็นส่วนหนึ่งของ "บรรลุ PLO ครบทุกข้อ" (สถิติวงแหวนหน้า
                 "ภาพรวม PLO" ดู all_plo_achieved_count/_count_all_qualifying_plo_achieved) — dynamic
-                ตามข้อมูล course_plo จริงเสมอ ไม่ hardcode รายชื่อ PLO ที่ตัดออก
+                ตามข้อมูล clo_plo_mapping จริงเสมอ ไม่ hardcode รายชื่อ PLO ที่ตัดออก
 
-    ถ้าแก้ : ถ้าข้อมูล course_plo เปลี่ยน (เช่นมีคนเติม mapping ให้ PLO ที่เคยไม่มีวิชาเลย) ผลลัพธ์จะ
-             เปลี่ยนตามอัตโนมัติโดยไม่ต้องแก้โค้ดจุดนี้ — ถ้าลบฟังก์ชันนี้ไป วงแหวน "บรรลุครบทุกข้อ" จะ
-             ค้างที่ 0% เสมอ เพราะ PLO ที่ไม่มีวิชาบังคับเลยเป็นไปไม่ได้อยู่แล้วโดยดีไซน์
+    ถ้าแก้ : ถ้าข้อมูล clo_plo_mapping เปลี่ยน (เช่นมีคนเติม mapping ให้ PLO ที่เคยไม่มี CLO ผูกเลย)
+             ผลลัพธ์จะเปลี่ยนตามอัตโนมัติโดยไม่ต้องแก้โค้ดจุดนี้ — ถ้าลบฟังก์ชันนี้ไป วงแหวน "บรรลุครบทุก
+             ข้อ" จะค้างที่ 0% เสมอ เพราะ PLO ที่ไม่มี CLO ผูกเลยเป็นไปไม่ได้อยู่แล้วโดยดีไซน์
     """
     return {plo_id for plo_id, courses in plo_requirements.items() if courses}
 
@@ -222,9 +226,9 @@ def _student_passed_course_for_plo(
     course_clo_ids: set[int], clo_mastery: dict[int, Decimal], clo_pass_thresholds: dict[int, Decimal]
 ) -> bool:
     """
-    ทำอะไร : ตัดสินว่านักศึกษา "ผ่านวิชานี้สำหรับ PLO นี้" หรือไม่ — ผ่านก็ต่อเมื่อผ่านทุก CLO ของ
-             วิชานั้น (course_clo_ids คือ CLO ทั้งหมดของวิชา ดูเหตุผลใน docstring ของ
-             _build_plo_requirements ว่าทำไมไม่มีการเลือกเฉพาะบาง CLO)
+    ทำอะไร : ตัดสินว่านักศึกษา "ผ่านวิชานี้สำหรับ PLO นี้" หรือไม่ — ผ่านก็ต่อเมื่อผ่านทุก CLO ในกลุ่มนี้
+             (course_clo_ids คือ CLO ของวิชาที่ถูกผูกกับ PLO นี้โดยตรงผ่าน clo_plo_mapping เท่านั้น
+             อาจเป็นแค่บางส่วนของ CLO ทั้งหมดในวิชา — ดู docstring ของ _build_plo_requirements)
 
     เชื่อมกับ : เรียก _clo_passed ทีละ CLO — ถูกเรียกโดย _student_achieved_plo และ
                 get_student_plo_course_breakdown
@@ -241,9 +245,9 @@ def _student_achieved_plo(
     clo_pass_thresholds: dict[int, Decimal],
 ) -> bool:
     """
-    ทำอะไร : ตัดสินว่านักศึกษา "บรรลุ PLO" ข้อนี้หรือไม่ — บรรลุก็ต่อเมื่อผ่านวิชาบังคับทุกวิชาของ PLO
-             นี้ (ดึงมาจาก course_plo แบบ global ไม่ใช่เฉพาะวิชาที่ลงทะเบียนจริง) PLO ที่ไม่มีวิชา
-             บังคับเลยถือว่า "ยังไม่บรรลุ" (ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ)
+    ทำอะไร : ตัดสินว่านักศึกษา "บรรลุ PLO" ข้อนี้หรือไม่ — บรรลุก็ต่อเมื่อผ่านทุกวิชาที่มี CLO ผูกกับ PLO
+             นี้ (ดึงมาจาก clo_plo_mapping แบบ global ไม่ใช่เฉพาะวิชาที่ลงทะเบียนจริง) PLO ที่ไม่มี CLO
+             ผูกอยู่เลยถือว่า "ยังไม่บรรลุ" (ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ)
 
     เชื่อมกับ : ใช้ courses_for_plo ที่ได้จาก _build_plo_requirements และเรียก
                 _student_passed_course_for_plo ทีละวิชา — ผลลัพธ์นี้คือค่า is_achieved ที่แสดงบนหน้า
@@ -579,14 +583,14 @@ def get_student_plo_course_breakdown(
     current_user: User = Depends(get_current_user),
 ):
     """
-    ทำอะไร : คืนวิชาบังคับทั้งหมดที่เกี่ยวข้องกับ PLO ข้อนี้ (จาก course_plo
-             responsibility_level='primary') พร้อมสถานะผ่าน/ไม่ผ่านของนักศึกษาคนนี้โดยเฉพาะต่อวิชา
+    ทำอะไร : คืนวิชาทั้งหมดที่มี CLO ผูกกับ PLO ข้อนี้โดยตรง (จาก clo_plo_mapping) พร้อมสถานะผ่าน/
+             ไม่ผ่านของนักศึกษาคนนี้โดยเฉพาะต่อวิชา
 
     เชื่อมกับ : เรียก _build_plo_requirements และ _student_passed_course_for_plo ตัวเดียวกับที่ตัดสิน
                 "% บรรลุ PLO" ทุกที่ในไฟล์นี้ ไม่มี logic คำนวณแยกที่อาจ drift ไม่ตรงกัน — ใช้ในหน้า
                 ภาพรวม PLO ตอนขยายดูรายชื่อนักศึกษาต่อ PLO (PLOStudentBreakdown.jsx)
 
-    ถ้าแก้ : 404 ถ้าไม่พบ PLO หรือนักศึกษา — คืน [] ถ้า PLO นั้นไม่มีวิชาบังคับเลย (ไม่ error)
+    ถ้าแก้ : 404 ถ้าไม่พบ PLO หรือนักศึกษา — คืน [] ถ้า PLO นั้นไม่มี CLO ผูกอยู่เลย (ไม่ error)
     """
     plo = db.get(PLO, plo_id)
     if plo is None:

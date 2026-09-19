@@ -5,16 +5,17 @@ Tests สำหรับ GET /courses/{course_id}/enrolled-students และ pl
 _student_passed_course_for_plo ใน plo_calculation.py ไม่ใช่ % เฉลี่ยแบบเดิม) รวมถึง edge case คะแนน
 ไม่ครบ/ไม่มีเลย
 
-ผูกกับ PLO ตอนนี้เป็นระดับวิชา (course_plo, responsibility_level='primary') ไม่ใช่รายตัวต่อ CLO - CLO
-ทุกตัวของวิชาที่ course_plo ทำเครื่องหมาย primary ไว้กับ PLO ข้อนี้นับเข้าไปในการคำนวณเสมอ ไม่มีสถานะ
-"มี CLO อยู่แต่ไม่ได้ผูกกับ PLO นี้" อีกต่อไป
+ผูกกับ PLO เป็นรายตัวต่อ CLO ผ่านตาราง clo_plo_mapping โดยตรง (ไม่ใช่ระดับวิชาแบบ course_plo อีกต่อไป -
+ดู _build_plo_requirements ใน plo_calculation.py) - CLO ตัวไหนไม่ได้ผูกกับ PLO ข้อนี้ไว้ใน
+clo_plo_mapping จะไม่ถูกนับเข้าการคำนวณเลย แม้จะอยู่ในวิชาเดียวกับ CLO ที่ผูกไว้ก็ตาม (นี่คือเหตุผลที่
+เปลี่ยนมาใช้ clo_plo_mapping แทน course_plo - วิชาหนึ่งอาจมี CLO ที่ผูกกับ PLO คนละข้อกัน)
 
-plo_achieved เป็น null ("ยังไม่มีข้อมูลให้ประเมิน") ใน 2 กรณี: (1) วิชานี้ยังไม่มี CLO เลยสักตัว (หรือ
-course_plo ของวิชานี้กับ PLO ข้อนี้ไม่ใช่ primary) หรือ (2) มี CLO อยู่ แต่นักศึกษายังไม่มี record คะแนน
-บันทึกไว้เลยสักรายการสำหรับ CLO ใดๆ ของวิชานี้ (ต่างจากได้คะแนน 0 จริงซึ่งนับเป็นข้อมูลแล้ว) - False
-เกิดเฉพาะเมื่อมี record คะแนนอยู่แล้วอย่างน้อย 1 รายการในกลุ่ม CLO ของวิชานี้ แล้วคำนวณตามเกณฑ์ผ่านของ
-แต่ละ CLO ออกมาว่าไม่ถึง (รวมถึง CLO อื่นในกลุ่มที่ยังไม่มี record เลยก็ยังนับเป็นไม่ผ่านตาม
-all-or-nothing ปกติ ตราบใดที่มีอย่างน้อย 1 CLO ในกลุ่มที่มี record แล้ว)
+plo_achieved เป็น null ("ยังไม่มีข้อมูลให้ประเมิน") ใน 2 กรณี: (1) วิชานี้ไม่มี CLO ตัวไหนผูกกับ PLO
+ข้อนี้ผ่าน clo_plo_mapping เลย (ไม่มี CLO เลย หรือมี CLO แต่ไม่ได้ผูกกับ PLO นี้) หรือ (2) มี CLO ผูกอยู่
+แต่นักศึกษายังไม่มี record คะแนนบันทึกไว้เลยสักรายการสำหรับ CLO ที่ผูกไว้เหล่านั้น (ต่างจากได้คะแนน 0
+จริงซึ่งนับเป็นข้อมูลแล้ว) - False เกิดเฉพาะเมื่อมี record คะแนนอยู่แล้วอย่างน้อย 1 รายการในกลุ่ม CLO ที่
+ผูกกับ PLO นี้ แล้วคำนวณตามเกณฑ์ผ่านของแต่ละ CLO ออกมาว่าไม่ถึง (รวมถึง CLO อื่นในกลุ่มที่ยังไม่มี record
+เลยก็ยังนับเป็นไม่ผ่านตาม all-or-nothing ปกติ ตราบใดที่มีอย่างน้อย 1 CLO ในกลุ่มที่มี record แล้ว)
 
 ทุกเทสสร้างข้อมูลของตัวเองใน db_session (rollback อัตโนมัติหลังจบเทสตาม conftest.py) ไม่พึ่งข้อมูลที่มี
 อยู่ก่อนในฐานข้อมูลทดสอบเลย เพื่อไม่ให้เทสตัวหนึ่งกระทบอีกตัว
@@ -23,8 +24,8 @@ from __future__ import annotations
 
 from app.models import (
     CLO,
+    CLOPLOMapping,
     Course,
-    CoursePLO,
     CourseOffering,
     Curriculum,
     Enrollment,
@@ -36,9 +37,10 @@ from app.models import (
 )
 
 
-def _make_base_fixtures(db_session, *, primary_for_plo: bool = True):
-    """สร้าง curriculum + course + PLO + course_plo(primary) + course_offering ตัวตั้งต้นที่ใช้ร่วมกัน
-    ทุกเทสในไฟล์นี้ - คืน dict ของ object ที่สร้างไว้ให้ประกอบต่อ"""
+def _make_base_fixtures(db_session):
+    """สร้าง curriculum + course + PLO + course_offering ตัวตั้งต้นที่ใช้ร่วมกันทุกเทสในไฟล์นี้ - คืน
+    dict ของ object ที่สร้างไว้ให้ประกอบต่อ (การผูก CLO กับ PLO ทำทีละตัวผ่าน _add_clo_with_score
+    ด้านล่าง ไม่ได้ทำที่ระดับวิชาแบบนี้อีกต่อไป)"""
     curriculum = Curriculum(name="Test Curriculum", year=2569)
     db_session.add(curriculum)
     db_session.flush()
@@ -52,11 +54,6 @@ def _make_base_fixtures(db_session, *, primary_for_plo: bool = True):
     plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO")
     db_session.add(plo)
     db_session.flush()
-
-    if primary_for_plo:
-        db_session.add(
-            CoursePLO(course_id=course.id, plo_id=plo.id, responsibility_level="primary")
-        )
 
     offering = CourseOffering(
         course_id=course.id, academic_year=2569, semester=1, section="1"
@@ -92,11 +89,12 @@ def _add_clo_with_score(
     student_id: str | None,
     score_obtained: float | None,
     total_score: float = 100.0,
+    plo_id: int | None = None,
 ) -> CLO:
     """สร้าง CLO 1 ตัวของวิชานี้ พร้อม assessment_item+item_clo 1 ชุด (pass_threshold_percent 60.00) -
-    CLO ตัวนี้จะนับเข้ากับทุก PLO ที่ course_plo ของวิชานี้ทำเครื่องหมาย primary ไว้โดยอัตโนมัติ (ไม่ต้อง
-    ผูกรายตัวอีกต่อไป) ถ้า student_id + score_obtained ไม่ใช่ None จะกรอกคะแนนให้นักศึกษาคนนั้นด้วย (ไม่
-    กรอก = จำลอง "ยังไม่มีคะแนนเลย")"""
+    ผูก CLO ตัวนี้กับ PLO ที่ระบุผ่าน clo_plo_mapping โดยตรงถ้าส่ง plo_id มา (ไม่ส่ง/None = ไม่ผูก จำลอง
+    "มี CLO อยู่แต่ไม่ได้ผูกกับ PLO นี้") ถ้า student_id + score_obtained ไม่ใช่ None จะกรอกคะแนนให้
+    นักศึกษาคนนั้นด้วย (ไม่กรอก = จำลอง "ยังไม่มีคะแนนเลย")"""
     clo = CLO(
         course_id=course_id,
         code=clo_code,
@@ -106,6 +104,9 @@ def _add_clo_with_score(
     )
     db_session.add(clo)
     db_session.flush()
+
+    if plo_id is not None:
+        db_session.add(CLOPLOMapping(clo_id=clo.id, plo_id=plo_id))
 
     item = AssessmentItem(
         offering_id=offering_id, name=f"item-{clo_code}", type="quiz", total_score=total_score
@@ -160,6 +161,7 @@ def test_all_clos_passed_returns_achieved_true(client, db_session, admin_user):
         admin_user_id=admin_user.id,
         student_id="TEST001",
         score_obtained=90.0,
+        plo_id=fx["plo"].id,
     )
     _add_clo_with_score(
         db_session,
@@ -169,6 +171,7 @@ def test_all_clos_passed_returns_achieved_true(client, db_session, admin_user):
         admin_user_id=admin_user.id,
         student_id="TEST001",
         score_obtained=70.0,
+        plo_id=fx["plo"].id,
     )
     db_session.commit()
 
@@ -198,6 +201,7 @@ def test_one_clo_without_score_makes_achieved_false(client, db_session, admin_us
         admin_user_id=admin_user.id,
         student_id="TEST001",
         score_obtained=60.0,
+        plo_id=fx["plo"].id,
     )
     _add_clo_with_score(
         db_session,
@@ -207,6 +211,7 @@ def test_one_clo_without_score_makes_achieved_false(client, db_session, admin_us
         admin_user_id=admin_user.id,
         student_id=None,
         score_obtained=None,
+        plo_id=fx["plo"].id,
     )
     db_session.commit()
 
@@ -236,6 +241,7 @@ def test_no_recorded_score_at_all_is_null_not_false(client, db_session, admin_us
         admin_user_id=admin_user.id,
         student_id=None,
         score_obtained=None,
+        plo_id=fx["plo"].id,
     )
     db_session.commit()
 
@@ -264,6 +270,7 @@ def test_recorded_score_below_threshold_returns_false(client, db_session, admin_
         admin_user_id=admin_user.id,
         student_id="TEST001",
         score_obtained=40.0,
+        plo_id=fx["plo"].id,
     )
     db_session.commit()
 
@@ -292,6 +299,7 @@ def test_recorded_score_of_zero_is_data_not_missing(client, db_session, admin_us
         admin_user_id=admin_user.id,
         student_id="TEST001",
         score_obtained=0.0,
+        plo_id=fx["plo"].id,
     )
     db_session.commit()
 
@@ -302,8 +310,8 @@ def test_recorded_score_of_zero_is_data_not_missing(client, db_session, admin_us
 
 
 def test_course_with_zero_clo_returns_null_no_error(client, db_session):
-    """วิชานี้ course_plo(primary) ผูกกับ PLO นี้อยู่ แต่ยังไม่มี CLO เลยสักตัว - ต้อง null ทุกคน ไม่ error
-    (ไม่มีสถานะ "มี CLO แต่ไม่ได้ผูก" อีกต่อไปในโมเดลใหม่ - null เกิดจากไม่มี CLO เลยเท่านั้น)"""
+    """วิชานี้ยังไม่มี CLO เลยสักตัว - ต้อง null ทุกคน ไม่ error (ไม่มี CLO ให้ผูกกับ PLO นี้ผ่าน
+    clo_plo_mapping ได้เลย จึงไม่มีอะไรให้คำนวณ)"""
     fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
@@ -319,13 +327,13 @@ def test_course_with_zero_clo_returns_null_no_error(client, db_session):
     assert body[0]["plo_achieved"] is None
 
 
-def test_secondary_course_plo_excluded_same_as_null(client, db_session, admin_user):
-    """วิชานี้มี CLO อยู่จริง แต่ course_plo เป็น 'secondary' ไม่ใช่ 'primary' - ต้องนับเหมือนไม่มีการ
-    เชื่อมโยง (null) ตาม _build_plo_requirements ที่นับเฉพาะ primary"""
-    fx = _make_base_fixtures(db_session, primary_for_plo=False)
-    db_session.add(
-        CoursePLO(course_id=fx["course"].id, plo_id=fx["plo"].id, responsibility_level="secondary")
-    )
+def test_clo_not_mapped_to_this_plo_excluded_same_as_null(client, db_session, admin_user):
+    """วิชานี้มี CLO อยู่จริง และนักศึกษาผ่านเกณฑ์คะแนนสูงมาก (95%) แต่ CLO ตัวนี้ไม่ได้ผูกกับ PLO ข้อนี้
+    เลยผ่าน clo_plo_mapping (plo_id=None ใน _add_clo_with_score) - ต้องนับเหมือนไม่มีข้อมูล (null) ไม่ใช่
+    True แม้คะแนนจะสูงก็ตาม เพราะ CLO นี้ไม่ใช่หลักฐานของ PLO ข้อนี้ นี่คือ regression test ของบั๊กที่
+    ระบบเดิม (course_plo responsibility_level='primary') เคยพลาด - เคยถือว่า CLO ทุกตัวของวิชาที่ primary
+    กับ PLO ข้อไหนก็นับเป็นหลักฐานของ PLO ข้อนั้นหมด ทั้งที่ มคอ.3 จริงผูก CLO กับ PLO เป็นรายข้อ"""
+    fx = _make_base_fixtures(db_session)
     _enroll_student(
         db_session,
         curriculum_id=fx["curriculum"].id,
@@ -340,6 +348,7 @@ def test_secondary_course_plo_excluded_same_as_null(client, db_session, admin_us
         admin_user_id=admin_user.id,
         student_id="TEST001",
         score_obtained=95.0,
+        plo_id=None,
     )
     db_session.commit()
 
@@ -442,6 +451,7 @@ def test_batch_query_count_does_not_scale_per_student(client, db_session, admin_
         admin_user_id=admin_user.id,
         student_id="TEST000",
         score_obtained=80.0,
+        plo_id=fx["plo"].id,
     )
     db_session.commit()
 

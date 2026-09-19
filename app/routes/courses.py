@@ -160,8 +160,9 @@ def get_course_enrolled_students(
                     else None
                 )
         else:
-            # วิชานี้ไม่มี CLO ผูกกับ PLO ข้อนี้เลย (ไม่ว่าเพราะไม่ใช่ primary หรือยังไม่มี CLO
-            # เลยสักตัวในวิชานี้) - ไม่มีอะไรให้คำนวณ ไม่ใช่ error แค่ null ทุกคน
+            # วิชานี้ไม่มี CLO ผูกกับ PLO ข้อนี้เลย (ไม่ว่าเพราะยังไม่ได้ผูก CLO ไหนของวิชานี้กับ PLO นี้
+            # ผ่าน clo_plo_mapping หรือวิชานี้ยังไม่มี CLO เลยสักตัว) - ไม่มีอะไรให้คำนวณ ไม่ใช่ error แค่
+            # null ทุกคน
             plo_achieved_by_student_id = {s.id: None for s in students}
 
     return [
