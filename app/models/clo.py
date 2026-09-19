@@ -39,6 +39,10 @@ class CLO(Base):
     item_mappings: Mapped[list["ItemCLO"]] = relationship(
         back_populates="clo", cascade="all, delete-orphan"
     )
+    # PLO ที่ CLO นี้ถูกผูกไว้โดยตรง (ผ่านตาราง clo_plo_mapping) — ใช้เป็นหลักฐานคำนวณบรรลุ PLO
+    plo_mappings: Mapped[list["CLOPLOMapping"]] = relationship(
+        back_populates="clo", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<CLO id={self.id} code={self.code!r}>"
