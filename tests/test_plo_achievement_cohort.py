@@ -43,7 +43,7 @@ def test_cohort_achievement_end_to_end_with_clo_plo_mapping(client, db_session, 
     db_session.add(course)
     db_session.flush()
 
-    plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO")
+    plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO", category="ความรู้")
     db_session.add(plo)
     db_session.flush()
 
@@ -112,8 +112,8 @@ def test_clos_of_same_course_mapped_to_different_plos_are_evaluated_independentl
     db_session.add(course)
     db_session.flush()
 
-    plo_a = PLO(curriculum_id=curriculum.id, code="PLO-A", description_th="ทดสอบ PLO A")
-    plo_b = PLO(curriculum_id=curriculum.id, code="PLO-B", description_th="ทดสอบ PLO B")
+    plo_a = PLO(curriculum_id=curriculum.id, code="PLO-A", description_th="ทดสอบ PLO A", category="ความรู้")
+    plo_b = PLO(curriculum_id=curriculum.id, code="PLO-B", description_th="ทดสอบ PLO B", category="ทักษะ")
     db_session.add_all([plo_a, plo_b])
     db_session.flush()
 

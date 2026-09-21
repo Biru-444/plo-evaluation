@@ -65,7 +65,12 @@ def upsert_plos(db) -> dict[str, PLO]:
             .first()
         )
         if plo is None:
-            plo = PLO(curriculum_id=CURRICULUM_ID, code=code, description_th=description_th)
+            plo = PLO(
+                curriculum_id=CURRICULUM_ID,
+                code=code,
+                description_th=description_th,
+                category="อื่นๆ",
+            )
             db.add(plo)
             db.flush()
             inserted += 1

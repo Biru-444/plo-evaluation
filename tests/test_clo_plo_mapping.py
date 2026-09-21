@@ -58,8 +58,8 @@ def _make_fixtures(db_session):
     db_session.add(course)
     db_session.flush()
 
-    plo_a = PLO(curriculum_id=curriculum.id, code="PLO-A", description_th="ทดสอบ PLO A")
-    plo_b = PLO(curriculum_id=curriculum.id, code="PLO-B", description_th="ทดสอบ PLO B")
+    plo_a = PLO(curriculum_id=curriculum.id, code="PLO-A", description_th="ทดสอบ PLO A", category="ความรู้")
+    plo_b = PLO(curriculum_id=curriculum.id, code="PLO-B", description_th="ทดสอบ PLO B", category="ทักษะ")
     db_session.add_all([plo_a, plo_b])
     db_session.flush()
 

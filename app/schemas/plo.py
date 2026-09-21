@@ -12,6 +12,7 @@ class PLOSchema(BaseModel):
     code: str
     description_th: str
     description_en: str | None = None
+    category: str
 
 
 class PLOCreateSchema(BaseModel):
@@ -21,6 +22,7 @@ class PLOCreateSchema(BaseModel):
     code: str
     description_th: str
     description_en: str | None = None
+    category: str
 
 
 class PLOUpdateSchema(BaseModel):
@@ -29,6 +31,7 @@ class PLOUpdateSchema(BaseModel):
     code: str | None = None
     description_th: str | None = None
     description_en: str | None = None
+    category: str | None = None
 
 
 class PLOCoursePlanItemSchema(BaseModel):
