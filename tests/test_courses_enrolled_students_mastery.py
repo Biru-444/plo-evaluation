@@ -51,7 +51,7 @@ def _make_base_fixtures(db_session):
     db_session.add(course)
     db_session.flush()
 
-    plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO")
+    plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO", category="ความรู้")
     db_session.add(plo)
     db_session.flush()
 

@@ -21,6 +21,8 @@ class PLO(Base):
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     description_th: Mapped[str] = mapped_column(Text, nullable=False)
     description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ประเภทของ PLO เช่น ความรู้ / ทักษะ / จริยธรรม / ลักษณะบุคคล / อื่นๆ (ข้อความอิสระ) - บังคับกรอกเสมอ
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
 
     curriculum: Mapped["Curriculum"] = relationship(back_populates="plos")
     # YLO ที่ถูก map มาที่ PLO นี้ (ผ่านตาราง ylo_plo_mapping) — ใช้ตัดสินว่า YLO ปีไหนต้องพึ่ง PLO นี้บ้าง

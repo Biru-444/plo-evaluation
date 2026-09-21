@@ -46,7 +46,7 @@ def test_by_year_excludes_students_who_have_not_reached_that_year_level(
     db_session.add(course)
     db_session.flush()
 
-    plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO")
+    plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ PLO", category="ความรู้")
     db_session.add(plo)
     db_session.flush()
 

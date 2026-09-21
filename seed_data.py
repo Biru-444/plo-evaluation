@@ -185,7 +185,7 @@ def seed_curriculum(db: Session) -> Curriculum:
 
 def seed_plos(db: Session, curriculum: Curriculum) -> list[PLO]:
     plos = [
-        PLO(curriculum_id=curriculum.id, code=code, description_th=th, description_en=en)
+        PLO(curriculum_id=curriculum.id, code=code, description_th=th, description_en=en, category="อื่นๆ")
         for code, th, en in PLO_DATA
     ]
     db.add_all(plos)
