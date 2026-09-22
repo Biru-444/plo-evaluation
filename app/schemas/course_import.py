@@ -7,10 +7,12 @@ Phase 2 (บันทึกจริงจากผลลัพธ์ที่�
             (structured output) ใน app/services/mco3_import_service.py และใช้เป็น response_model
             ของ POST /courses/import-from-mco3 ด้วย - เป็น single source of truth เดียวระหว่าง
             "รูปแบบที่บอกโมเดลให้ตอบ" กับ "contract ที่ frontend ได้รับกลับจริง" กันไม่ให้สอง
-            ฝั่ง drift ไม่ตรงกัน - CourseImportSaveRequest ใช้ MCO3CLOItem/MCO3CLOPLOMappingItem
-            ร่วมกับ Phase 1 (โครงเดียวกันเป๊ะ) แต่ไม่มี category_raw/instructor_name/
-            semester_display/flags เพราะ field พวกนี้เป็นข้อมูลสำหรับ "หน้าตรวจสอบ" เท่านั้น ไม่มีที่
-            เก็บถาวร (ดู app/routes/course_import.py POST /courses/import-from-mco3/save)
+            ฝั่ง drift ไม่ตรงกัน - CourseImportSaveRequest ใช้ MCO3CLOItem ร่วมกับ Phase 1 (โครงเดียวกัน
+            เป๊ะ) แต่ clo_plo_mapping ใช้ MCO3CLOPLOMappingSaveItem แยกต่างหาก (เพิ่ม weight_percent -
+            Workstream 3 - ที่ Phase 1/Gemini ไม่รู้จักเลย ดู docstring ของ 2 คลาสนั้น) และไม่มี
+            category_raw/instructor_name/semester_display/flags เพราะ field พวกนี้เป็นข้อมูลสำหรับ
+            "หน้าตรวจสอบ" เท่านั้น ไม่มีที่เก็บถาวร (ดู app/routes/course_import.py POST
+            /courses/import-from-mco3/save)
 
 ถ้าแก้ : เพิ่ม field ใหม่ใน CourseImportFromMCO3Response ต้องคิดด้วยว่า Gemini จะรู้ได้ยังไงว่าต้อง
          กรอกอะไร (ดู system instruction ใน mco3_import_service.py ที่อธิบาย field พวกนี้เป็นภาษาไทย
@@ -19,6 +21,7 @@ Phase 2 (บันทึกจริงจากผลลัพธ์ที่�
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,8 +43,21 @@ class MCO3CLOItem(BaseModel):
 
 
 class MCO3CLOPLOMappingItem(BaseModel):
+    """เฉพาะ Phase 1 (ผลลัพธ์ดิบจาก Gemini) - ไม่มี weight_percent เพราะ Gemini บอกได้แค่ว่า CLO ข้อไหน
+    "เกี่ยวข้อง" กับ PLO ข้อไหน ไม่ใช่ "สำคัญแค่ไหน" (ดู MCO3CLOPLOMappingSaveItem สำหรับ Phase 2)"""
+
     clo_code: str
     plo_code: str
+
+
+class MCO3CLOPLOMappingSaveItem(BaseModel):
+    """เฉพาะ Phase 2 (คำขอบันทึกจริง) - เพิ่ม weight_percent ของคู่นี้ (Workstream 3) ที่หน้า Phase 3
+    (AdminCourseImportMCO3.jsx) auto-fill เกลี่ยเท่ากันต่อ CLO ให้เองฝั่ง client ตอนติ๊ก/ถอด PLO แต่ละ
+    ข้อ แล้วค่อยส่งมาที่นี่ตอนกด "ยืนยันบันทึก" - ต้องมีค่าเสมอ (NOT NULL ที่ DB ด้วย)"""
+
+    clo_code: str
+    plo_code: str
+    weight_percent: Decimal = Field(gt=0, le=100)
 
 
 MCO3FlagType = Literal[
@@ -92,7 +108,7 @@ class CourseImportSaveRequest(BaseModel):
     credit: int
     category: str | None = None
     clos: list[MCO3CLOItem] = Field(default_factory=list)
-    clo_plo_mapping: list[MCO3CLOPLOMappingItem] = Field(default_factory=list)
+    clo_plo_mapping: list[MCO3CLOPLOMappingSaveItem] = Field(default_factory=list)
 
 
 class CourseImportSaveResponse(BaseModel):

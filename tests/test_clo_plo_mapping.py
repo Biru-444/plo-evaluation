@@ -1,8 +1,9 @@
 """
-Tests สำหรับ /clo-plo-mapping (list/create/delete) ที่คืนกลับมาใหม่ (ดู
+Tests สำหรับ /clo-plo-mapping (list/create/update/delete) ที่คืนกลับมาใหม่ (ดู
 app/routes/clo_plo_mapping.py) รวมถึง plo_ids เสริมที่ POST/PUT /clo รับได้ในคำขอเดียวกัน (ดู
 app/routes/clo.py) - ครอบคลุมทั้ง happy path, ownership check (admin ผ่านเสมอ / อาจารย์เจ้าของวิชา
-ผ่านได้ / อาจารย์คนอื่นโดน 403), 404, และ 409 (ซ้ำ/อ้าง PLO ที่ไม่มีจริง)
+ผ่านได้ / อาจารย์คนอื่นโดน 403), 404, 409 (ซ้ำ/อ้าง PLO ที่ไม่มีจริง) และ weight_percent auto-fill/
+rebalance (Workstream 3 - ดู แผนการแก้ไขครั้งใหญ่-PLO-CLO.md)
 
 ownership check ต้องทดสอบด้วย current_user ที่ไม่ใช่ admin - conftest.py's `client` fixture ผูกกับ
 admin_user ตรงๆ จึงมี `make_client` fixture ของไฟล์นี้เองที่สร้าง TestClient ใหม่ override
@@ -126,9 +127,89 @@ def test_create_as_non_owning_instructor_returns_403(make_client, db_session):
     assert resp.status_code == 403
 
 
+def test_create_auto_fills_weight_evenly_across_clos_own_plo_links(client, db_session):
+    """ผูก PLO-A แล้ว PLO-B ให้ CLO เดียวกัน - หลังผูกครบ 2 คู่ ต้องเกลี่ยเท่ากัน 50/50 (ไม่ใช่ null
+    และไม่ใช่ 100 คงที่) ตามกฎ auto-fill เกลี่ยเท่ากันเสมอ"""
+    fx = _make_fixtures(db_session)
+    db_session.commit()
+
+    resp_a = client.post("/clo-plo-mapping", json={"clo_id": fx["clo"].id, "plo_id": fx["plo_a"].id})
+    assert resp_a.status_code == 201
+    assert float(resp_a.json()["weight_percent"]) == 100.0  # คู่เดียว = 100%
+
+    resp_b = client.post("/clo-plo-mapping", json={"clo_id": fx["clo"].id, "plo_id": fx["plo_b"].id})
+    assert resp_b.status_code == 201
+    assert float(resp_b.json()["weight_percent"]) == 50.0  # 2 คู่ = เกลี่ยเท่ากัน 50/50
+
+    # คู่แรก (PLO-A) ต้องถูกเกลี่ยใหม่เป็น 50 ด้วยเช่นกัน ไม่ใช่ค้างที่ 100 เดิม
+    mapping_a = (
+        db_session.query(CLOPLOMapping)
+        .filter(CLOPLOMapping.clo_id == fx["clo"].id, CLOPLOMapping.plo_id == fx["plo_a"].id)
+        .one()
+    )
+    assert float(mapping_a.weight_percent) == 50.0
+
+
+def test_delete_rebalances_remaining_weights_evenly(client, db_session):
+    """ผูกครบ 3 PLO (33.33 ต่อคู่) แล้วถอด 1 คู่ - 2 คู่ที่เหลือต้องเกลี่ยกลับเป็น 50/50"""
+    fx = _make_fixtures(db_session)
+    plo_c = fx["plo_a"].__class__(
+        curriculum_id=fx["curriculum"].id, code="PLO-C", description_th="ทดสอบ PLO C", category="จริยธรรม"
+    )
+    db_session.add(plo_c)
+    db_session.commit()
+
+    ids = []
+    for plo in (fx["plo_a"], fx["plo_b"], plo_c):
+        resp = client.post("/clo-plo-mapping", json={"clo_id": fx["clo"].id, "plo_id": plo.id})
+        assert resp.status_code == 201
+        ids.append(resp.json()["id"])
+
+    remaining = (
+        db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == fx["clo"].id).all()
+    )
+    assert all(float(m.weight_percent) == 33.33 for m in remaining)
+
+    resp = client.delete(f"/clo-plo-mapping/{ids[0]}")
+    assert resp.status_code == 204
+
+    remaining = (
+        db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == fx["clo"].id).all()
+    )
+    assert len(remaining) == 2
+    assert all(float(m.weight_percent) == 50.0 for m in remaining)
+
+
+def test_update_weight_percent_does_not_rebalance_siblings(client, db_session):
+    """PUT แก้ weight_percent ของคู่เดียว - คู่พี่น้องอื่นของ CLO เดียวกันต้องไม่ถูกแตะ (ต่างจาก
+    create/delete ที่ trigger rebalance ทั้งชุด)"""
+    fx = _make_fixtures(db_session)
+    resp_a = client.post("/clo-plo-mapping", json={"clo_id": fx["clo"].id, "plo_id": fx["plo_a"].id})
+    resp_b = client.post("/clo-plo-mapping", json={"clo_id": fx["clo"].id, "plo_id": fx["plo_b"].id})
+    mapping_a_id = resp_a.json()["id"]
+    mapping_b_id = resp_b.json()["id"]
+
+    resp = client.put(f"/clo-plo-mapping/{mapping_a_id}", json={"weight_percent": 80})
+    assert resp.status_code == 200
+    assert float(resp.json()["weight_percent"]) == 80.0
+
+    mapping_b = db_session.get(CLOPLOMapping, mapping_b_id)
+    assert float(mapping_b.weight_percent) == 50.0  # ไม่ถูก rebalance ตาม แม้ผลรวมจะไม่เท่า 100 แล้ว
+
+
+def test_update_weight_percent_requires_admin_or_owning_instructor(make_client, db_session):
+    fx = _make_fixtures(db_session)
+    mapping = CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=100)
+    db_session.add(mapping)
+    db_session.commit()
+
+    resp = make_client(fx["other"]).put(f"/clo-plo-mapping/{mapping.id}", json={"weight_percent": 80})
+    assert resp.status_code == 403
+
+
 def test_create_duplicate_returns_409(client, db_session):
     fx = _make_fixtures(db_session)
-    db_session.add(CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id))
+    db_session.add(CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=100))
     db_session.commit()
 
     resp = client.post("/clo-plo-mapping", json={"clo_id": fx["clo"].id, "plo_id": fx["plo_a"].id})
@@ -155,8 +236,8 @@ def test_list_filters_by_clo_id_and_plo_id(client, db_session):
     fx = _make_fixtures(db_session)
     db_session.add_all(
         [
-            CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id),
-            CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_b"].id),
+            CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=50),
+            CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_b"].id, weight_percent=50),
         ]
     )
     db_session.commit()
@@ -172,7 +253,7 @@ def test_list_filters_by_clo_id_and_plo_id(client, db_session):
 
 def test_delete_as_admin_succeeds(client, db_session):
     fx = _make_fixtures(db_session)
-    mapping = CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id)
+    mapping = CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=100)
     db_session.add(mapping)
     db_session.commit()
     mapping_id = mapping.id
@@ -184,7 +265,7 @@ def test_delete_as_admin_succeeds(client, db_session):
 
 def test_delete_as_non_owning_instructor_returns_403(make_client, db_session):
     fx = _make_fixtures(db_session)
-    mapping = CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id)
+    mapping = CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=100)
     db_session.add(mapping)
     db_session.commit()
 
@@ -214,33 +295,44 @@ def test_create_clo_with_plo_ids_maps_in_one_request(client, db_session, admin_u
     assert resp.status_code == 201
     clo_id = resp.json()["id"]
 
-    mapped_plo_ids = {
-        row.plo_id
-        for row in db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == clo_id).all()
-    }
-    assert mapped_plo_ids == {fx["plo_a"].id, fx["plo_b"].id}
+    mappings = db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == clo_id).all()
+    assert {m.plo_id for m in mappings} == {fx["plo_a"].id, fx["plo_b"].id}
+    assert all(float(m.weight_percent) == 50.0 for m in mappings)  # เกลี่ยเท่ากันทันที (2 ข้อ = 50/50)
 
 
 def test_update_clo_plo_ids_replaces_existing_mapping(client, db_session):
     """PUT /clo/{id} พร้อม plo_ids ใหม่ - ต้องแทนที่ mapping เดิมทั้งหมด (ถอด PLO-A ออก เหลือแค่ PLO-B)"""
     fx = _make_fixtures(db_session)
-    db_session.add(CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id))
+    db_session.add(CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=100))
     db_session.commit()
 
     resp = client.put(f"/clo/{fx['clo'].id}", json={"plo_ids": [fx["plo_b"].id]})
     assert resp.status_code == 200
 
-    mapped_plo_ids = {
-        row.plo_id
-        for row in db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == fx["clo"].id).all()
-    }
-    assert mapped_plo_ids == {fx["plo_b"].id}
+    mappings = db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == fx["clo"].id).all()
+    assert {m.plo_id for m in mappings} == {fx["plo_b"].id}
+    assert float(mappings[0].weight_percent) == 100.0  # PLO เดียว = 100%
+
+
+def test_update_clo_plo_ids_multiple_splits_weight_evenly(client, db_session):
+    """PUT /clo/{id} พร้อม plo_ids 2 ข้อพร้อมกัน - เกลี่ยเท่ากัน 50/50 ทันทีในคำขอเดียว"""
+    fx = _make_fixtures(db_session)
+    db_session.commit()
+
+    resp = client.put(
+        f"/clo/{fx['clo'].id}", json={"plo_ids": [fx["plo_a"].id, fx["plo_b"].id]}
+    )
+    assert resp.status_code == 200
+
+    mappings = db_session.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == fx["clo"].id).all()
+    assert len(mappings) == 2
+    assert all(float(m.weight_percent) == 50.0 for m in mappings)
 
 
 def test_update_clo_without_plo_ids_leaves_mapping_untouched(client, db_session):
     """PUT /clo/{id} ที่ไม่ส่ง plo_ids มาเลย (แก้แค่ description) - mapping เดิมต้องไม่ถูกแตะ"""
     fx = _make_fixtures(db_session)
-    db_session.add(CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id))
+    db_session.add(CLOPLOMapping(clo_id=fx["clo"].id, plo_id=fx["plo_a"].id, weight_percent=100))
     db_session.commit()
 
     resp = client.put(f"/clo/{fx['clo'].id}", json={"description": "แก้คำอธิบายอย่างเดียว"})

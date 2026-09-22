@@ -106,7 +106,10 @@ def _add_clo_with_score(
     db_session.flush()
 
     if plo_id is not None:
-        db_session.add(CLOPLOMapping(clo_id=clo.id, plo_id=plo_id))
+        # weight_percent ไม่มีผลต่อ endpoint นี้เลย (courses.py::get_course_enrolled_students ยังเป็น
+        # all-or-nothing ต่อวิชาเหมือนเดิม ไม่ได้เปลี่ยนตาม Workstream 3 - ดู plo_calculation.py module
+        # docstring) ใส่ค่าคงที่ไปเพื่อผ่าน NOT NULL เฉยๆ
+        db_session.add(CLOPLOMapping(clo_id=clo.id, plo_id=plo_id, weight_percent=100.00))
 
     item = AssessmentItem(
         offering_id=offering_id, name=f"item-{clo_code}", type="quiz", total_score=total_score

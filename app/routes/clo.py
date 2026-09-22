@@ -7,12 +7,17 @@
             จริงเท่านั้น (เช็คผ่าน course_offering.instructor_id) — created_by ถูกเซ็ตจาก
             current_user.id เสมอ ไม่รับค่าจาก client (ดู CLOCreateSchema) — create/update รับ plo_ids
             เสริมได้เพื่อผูก/แทนที่ mapping ใน clo_plo_mapping ในคำขอเดียวกัน (ดู CLOCreateSchema/
-            CLOUpdateSchema) ไม่ผูกก็ยังทำได้ปกติผ่าน POST /clo-plo-mapping แยกทีหลัง
+            CLOUpdateSchema) ไม่ผูกก็ยังทำได้ปกติผ่าน POST /clo-plo-mapping แยกทีหลัง - weight_percent
+            ของทุกคู่ที่สร้างผ่าน plo_ids เกลี่ยเท่ากันเสมอ (100/len(plo_ids)) เหมือนกับที่
+            POST /clo-plo-mapping ทำ (Workstream 3) - คำนวณตรงๆ ที่นี่แทนเรียก
+            _rebalance_clo_weights_evenly เพราะรู้ชุด PLO ทั้งหมดอยู่แล้วในคำขอเดียว ไม่ต้อง query ซ้ำ
 
 ถ้าแก้ : เกณฑ์ผ่าน (pass_threshold_percent) ที่แก้ผ่าน update_clo กระทบการตัดสิน CLO ผ่าน/ไม่ผ่าน
          ย้อนหลังทั้งหมดทันที (ดู app/models/clo.py)
 """
 from __future__ import annotations
+
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +29,12 @@ from app.models import CLO, CLOPLOMapping, CourseOffering, User
 from app.schemas import CLOCreateSchema, CLOSchema, CLOUpdateSchema
 
 router = APIRouter(prefix="/clo", tags=["CLO"])
+
+TWO_DECIMAL_PLACES = Decimal("0.01")
+
+
+def _even_weight_for(count: int) -> Decimal:
+    return (Decimal(100) / Decimal(count)).quantize(TWO_DECIMAL_PLACES, rounding=ROUND_HALF_UP)
 
 
 # คืนรายการ CLO ทั้งหมด กรองตาม course_id ได้
@@ -76,8 +87,10 @@ def create_clo(
     clo = CLO(**payload.model_dump(exclude={"plo_ids"}), created_by=current_user.id)
     db.add(clo)
     db.flush()  # ต้องมี clo.id ก่อนสร้างแถว clo_plo_mapping ที่อ้างถึง
-    for plo_id in plo_ids:
-        db.add(CLOPLOMapping(clo_id=clo.id, plo_id=plo_id))
+    if plo_ids:
+        even_weight = _even_weight_for(len(plo_ids))
+        for plo_id in plo_ids:
+            db.add(CLOPLOMapping(clo_id=clo.id, plo_id=plo_id, weight_percent=even_weight))
     try:
         db.commit()
     except IntegrityError as exc:
@@ -123,8 +136,10 @@ def update_clo(
         setattr(clo, field, value)
     if plo_ids_provided:
         db.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == clo_id).delete()
-        for plo_id in plo_ids or []:
-            db.add(CLOPLOMapping(clo_id=clo_id, plo_id=plo_id))
+        if plo_ids:
+            even_weight = _even_weight_for(len(plo_ids))
+            for plo_id in plo_ids:
+                db.add(CLOPLOMapping(clo_id=clo_id, plo_id=plo_id, weight_percent=even_weight))
     try:
         db.commit()
     except IntegrityError as exc:

@@ -75,8 +75,8 @@ def _payload(curriculum_id: int, course_code: str = "TEST101", **overrides):
             {"code": "CLO2", "description": "คำอธิบาย CLO2", "domain": "skills"},
         ],
         "clo_plo_mapping": [
-            {"clo_code": "CLO1", "plo_code": "PLO1"},
-            {"clo_code": "CLO2", "plo_code": "PLO2"},
+            {"clo_code": "CLO1", "plo_code": "PLO1", "weight_percent": 100},
+            {"clo_code": "CLO2", "plo_code": "PLO2", "weight_percent": 100},
         ],
     }
     body.update(overrides)
@@ -121,7 +121,9 @@ def test_save_rejects_duplicate_course_code_with_409_naming_existing_course_id(
 
 def test_save_rejects_unknown_clo_code_in_mapping_with_400(client, curriculum, plos):
     payload = _payload(curriculum.id, course_code="TEST102")
-    payload["clo_plo_mapping"] = [{"clo_code": "CLO_NOT_IN_LIST", "plo_code": "PLO1"}]
+    payload["clo_plo_mapping"] = [
+        {"clo_code": "CLO_NOT_IN_LIST", "plo_code": "PLO1", "weight_percent": 100}
+    ]
     resp = client.post("/courses/import-from-mco3/save", json=payload)
     assert resp.status_code == 400
     assert "CLO_NOT_IN_LIST" in resp.json()["detail"]
@@ -129,7 +131,9 @@ def test_save_rejects_unknown_clo_code_in_mapping_with_400(client, curriculum, p
 
 def test_save_rejects_unknown_plo_code_in_mapping_with_400(client, curriculum, plos):
     payload = _payload(curriculum.id, course_code="TEST103")
-    payload["clo_plo_mapping"] = [{"clo_code": "CLO1", "plo_code": "PLO_DOES_NOT_EXIST"}]
+    payload["clo_plo_mapping"] = [
+        {"clo_code": "CLO1", "plo_code": "PLO_DOES_NOT_EXIST", "weight_percent": 100}
+    ]
     resp = client.post("/courses/import-from-mco3/save", json=payload)
     assert resp.status_code == 400
     assert "PLO_DOES_NOT_EXIST" in resp.json()["detail"]

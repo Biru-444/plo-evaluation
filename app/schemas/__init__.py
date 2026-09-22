@@ -45,7 +45,7 @@ from .enrollment import (
     RecommendedOfferingSchema,
 )
 from .clo import CLOSchema, CLOCreateSchema, CLOUpdateSchema
-from .clo_plo_mapping import CLOPLOMappingSchema, CLOPLOMappingCreateSchema
+from .clo_plo_mapping import CLOPLOMappingSchema, CLOPLOMappingCreateSchema, CLOPLOMappingUpdateSchema
 from .assessment import (
     AssessmentItemSchema,
     AssessmentCreateSchema,
@@ -104,6 +104,7 @@ __all__ = [
     "CLOUpdateSchema",
     "CLOPLOMappingSchema",
     "CLOPLOMappingCreateSchema",
+    "CLOPLOMappingUpdateSchema",
     "AssessmentItemSchema",
     "AssessmentCreateSchema",
     "AssessmentItemUpdateSchema",

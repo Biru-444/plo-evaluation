@@ -3,22 +3,25 @@
          และแบบแยกตามชั้นปี (by-year) ถือเป็นไฟล์แกนกลางที่สุดของระบบ เพราะทุกหน้าที่แสดงผลบรรลุ
          PLO (ภาพรวม PLO, ผลบรรลุรายบุคคล, YLO ตามชั้นปี) ดึงตัวเลขมาจากที่นี่ทั้งหมด
 
-สูตรคำนวณ (all-or-nothing ตาม spec ที่ยืนยันแล้ว — ไม่ใช่คะแนนเฉลี่ยแบบต่อเนื่อง) :
+สูตรคำนวณ (ค่าเฉลี่ยถ่วงน้ำหนักต่อเนื่อง - Workstream 3, แทนที่ all-or-nothing เดิมทั้งหมด ดู
+แผนการแก้ไขครั้งใหญ่-PLO-CLO.md) :
   1. ระดับความเชี่ยวชาญ (mastery) ของแต่ละ CLO = ค่าเฉลี่ยถ่วงน้ำหนักของ % คะแนนที่นักศึกษาได้ในทุก
      assessment item ที่วัด CLO นั้น ถ่วงน้ำหนักด้วย item_clo.weight_percent (สูตรเดียวกับใน
-     clo_calculation.py) — CLO ที่นักศึกษาไม่มีคะแนนบันทึกไว้เลยจะไม่มีค่า mastery
-  2. CLO จะ "ผ่าน" ก็ต่อเมื่อ mastery >= pass_threshold_percent ของ CLO นั้นเอง (กำหนดแยกได้ต่อ CLO
-     ไม่ใช่ค่าคงที่ตายตัวทั้งระบบ) ไม่มีค่า mastery = ไม่ผ่าน
-  3. สำหรับ PLO ข้อหนึ่ง ๆ CLO ที่มีแถวใน clo_plo_mapping ผูกกับ PLO นั้นโดยตรง (ตาม มคอ.3 ของแต่ละ
-     วิชา — 1 CLO ผูกได้กับหลาย PLO และแต่ละ CLO ของวิชาเดียวกันไม่จำเป็นต้องผูกกับ PLO ชุดเดียวกัน)
-     ถือเป็นหลักฐานของ PLO นั้น จัดกลุ่มตามวิชาที่ CLO นั้นสังกัดอยู่ นักศึกษาจะ "ผ่านวิชาสำหรับ PLO
-     นี้" ก็ต่อเมื่อผ่านทุก CLO ของวิชานั้นที่ถูกผูกกับ PLO นี้ (ไม่ใช่ทุก CLO ของวิชา — วิชาเดียวกันอาจมี
-     CLO ที่ผูกกับ PLO อื่นซึ่งไม่เกี่ยวกับ PLO นี้เลย) — รายชื่อวิชา/CLO ที่เกี่ยวข้องหาได้จาก
-     clo_plo_mapping โดยตรง ไม่ขึ้นกับว่านักศึกษาคนนั้นลงทะเบียนวิชานั้นจริงหรือไม่
-  4. นักศึกษาจะ "บรรลุ PLO" ก็ต่อเมื่อผ่านทุกวิชาที่มี CLO ผูกกับ PLO นั้น — PLO ที่ไม่มี CLO ผูกอยู่
-     เลยจะถูกรายงานว่า "ยังไม่บรรลุ" (ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ)
-  achieved_percent เป็น 100.0/0.0 เสมอ (สะท้อนค่า is_achieved ตรง ๆ) ไม่ใช่ตัวเลขบางส่วน เพราะโมเดลนี้
-  ไม่มีแนวคิด "บรรลุบางส่วน" อีกต่อไป
+     clo_calculation.py - ไม่เปลี่ยนจากเดิม) — CLO ที่นักศึกษาไม่มีคะแนนบันทึกไว้เลยจะไม่มีค่า mastery
+  2. CLO จะ "ผ่าน" (ใช้แสดงผลแยกต่างหากเท่านั้น เช่น course-breakdown - ไม่เข้าสูตร PLO ด้านล่าง) ก็
+     ต่อเมื่อ mastery >= pass_threshold_percent ของ CLO นั้นเอง ไม่มีค่า mastery = ไม่ผ่าน
+  3. PLO_x (ต่อนักศึกษา 1 คน) = Σ(mastery_i × weight_i) / Σ(weight_i) โดย i วิ่งผ่านทุก CLO ที่ผูกกับ
+     PLO_x โดยตรงผ่าน clo_plo_mapping (ข้าม CLO ที่นักศึกษาคนนั้นไม่มี mastery เลย - ไม่นับเป็น 0 ไม่นับ
+     เข้าทั้งตัวตั้งและตัวหาร เหมือนกับที่ไม่มีคะแนนไม่นับเป็น 0 ในสูตร mastery เอง) weight_i คือ
+     clo_plo_mapping.weight_percent ของคู่ CLO-PLO นั้นๆ โดยเฉพาะ (ไม่ใช่ของ CLO เฉยๆ - ดู
+     app/models/clo_plo_mapping.py) **ไม่จัดกลุ่มตามวิชาอีกต่อไป** (ตัดสินใจแล้ว 2026-09-22 - เดิม
+     ต้องผ่านทุก CLO ของวิชาที่ผูกกับ PLO นี้ก่อนถึงจะนับวิชานั้น ตอนนี้คำนวณตรงจากคู่ CLO-PLO เลย ไม่มี
+     ชั้นวิชาคั่นกลาง) ผลรวมน้ำหนักของ CLO ทุกตัวที่ผูกกับ PLO ข้อหนึ่งๆ **ไม่บังคับต้องเท่า 100** (สูตร
+     หารด้วยผลรวมน้ำหนักเองอยู่แล้ว) PLO ที่ไม่มี CLO ผูกอยู่เลย หรือมี CLO ผูกอยู่แต่นักศึกษาไม่มี
+     mastery ของ CLO เหล่านั้นเลยสักตัว (Σweight ของ CLO ที่นับได้ = 0) ได้ PLO_x = 0.0
+  4. is_achieved = PLO_x >= PLO_ACHIEVEMENT_THRESHOLD_PERCENT (ค่าคงที่เดียวทั้งระบบ ดูด้านล่าง - ไม่มี
+     threshold แยกต่อ PLO) achieved_percent คือค่า PLO_x ตรงๆ (ต่อเนื่อง 0-100 จริง ไม่ใช่ 100/0 เหมือน
+     เดิมอีกต่อไป)
 
 เชื่อมกับ : - อ่าน/เขียนผ่านตาราง clo_plo_mapping, course, clo, item_clo, assessment_item,
               student_score ในฐานข้อมูล PostgreSQL (course_plo ไม่ได้ใช้คำนวณตรงนี้แล้ว — ยังเก็บไว้
@@ -28,13 +31,26 @@
             - GET /plo/achievement/by-year ถูกเรียกจากหน้า "YLO ตามชั้นปี" (สำหรับ course_count
               ต่อปี — ตัวเลข achievement ของ endpoint นี้เองยังไม่ถูกแสดงผลที่ไหนใน UI ปัจจุบัน)
             - ylo_calculation.py ยังใช้ course_plo ของตัวเอง (_build_ylo_requirements) ไม่ได้เปลี่ยน
-              ตาม — import แค่ _clo_passed จากไฟล์นี้ไปใช้ตัดสิน "ผ่าน CLO" แบบเดียวกัน
+              ตาม — import แค่ _clo_passed จากไฟล์นี้ไปใช้ตัดสิน "ผ่าน CLO" แบบเดียวกัน (ฟังก์ชันนี้ไม่ได้
+              แก้ใน Workstream 3 - CLO-level pass/fail ยังเหมือนเดิมทุกประการ เปลี่ยนแค่วิธีรวมขึ้นเป็น
+              PLO)
+            - courses.py::get_course_enrolled_students(?plo_id=) ยังใช้ตรรกะ all-or-nothing แบบเดิม
+              ต่อไป (คนละคำถามกับ PLO_x - "วิชานี้วิชาเดียวครบ CLO ที่ผูกไว้ไหม" ไม่ใช่ "คะแนนถ่วงน้ำหนัก
+              รวมทุกวิชาเท่าไหร่" - ตั้งใจไม่เปลี่ยนตาม เพื่อจำกัด blast radius) ยังคงเรียก
+              _build_plo_requirements ตัวเดียวกัน แค่ unpack ผลลัพธ์ 3 ค่าแทน 2 (ดู return type ใหม่
+              ด้านล่าง) - get_student_plo_course_breakdown ในไฟล์นี้เองก็เช่นกัน (ยังเป็น per-course
+              pass/fail เหมือนเดิม ไม่ได้เปลี่ยนเป็น per-CLO)
 
-ถ้าแก้ : แก้สูตรในไฟล์นี้ (โดยเฉพาะที่มาของ CLO ที่นับเป็นหลักฐานของ PLO หรือเกณฑ์ผ่าน CLO) จะกระทบ
-         % บรรลุ PLO ทั้งระบบทันที (หน้าภาพรวม PLO, ผลบรรลุรายบุคคล, /courses/{id}/enrolled-students
-         ?plo_id=) รวมถึงทำให้ผลของ tests/test_plo_achievement_cohort.py และ
-         tests/test_courses_enrolled_students_mastery.py เปลี่ยนไปด้วย ลำดับการลงทะเบียน router ของ
-         ไฟล์นี้ใน app/main.py ก็มีผลต่อการทำงาน (ดูคอมเมนต์ใน main.py) ห้ามสลับลำดับ
+ถ้าแก้ : แก้สูตรในไฟล์นี้ (โดยเฉพาะที่มาของ CLO ที่นับเป็นหลักฐานของ PLO, น้ำหนัก, หรือเกณฑ์ผ่าน CLO) จะ
+         กระทบ % บรรลุ PLO ทั้งระบบทันที (หน้าภาพรวม PLO, ผลบรรลุรายบุคคล) รวมถึงทำให้ผลของ
+         tests/test_plo_achievement_cohort.py เปลี่ยนไปด้วย ลำดับการลงทะเบียน router ของไฟล์นี้ใน
+         app/main.py ก็มีผลต่อการทำงาน (ดูคอมเมนต์ใน main.py) ห้ามสลับลำดับ
+
+         PLO_ACHIEVEMENT_THRESHOLD_PERCENT (60.0) ตั้งให้ตรงกับ CLO.pass_threshold_percent's
+         server_default (60.00, ดู app/models/clo.py) และ threshold ที่ frontend ใช้อยู่แล้วหลายจุด
+         (PLOSummaryStats.jsx เดิม, PLODonut.jsx default prop) - เป็นค่าคงที่เดียวทั้งระบบตามที่ผู้ใช้
+         ยืนยัน (ไม่ใช่ตั้งแยกได้ต่อ PLO เหมือน CLO.pass_threshold_percent) แก้ค่านี้กระทบ is_achieved/
+         achieved_rate_percent/all_plo_achieved_count ทั้งระบบทันที
 """
 from __future__ import annotations
 
@@ -66,8 +82,14 @@ from app.models import (
 
 router = APIRouter(prefix="/plo", tags=["PLO Achievement"])
 
+# เกณฑ์ตัดสิน is_achieved จาก PLO_x ที่เป็นค่าต่อเนื่องแล้ว (Workstream 3) - ค่าคงที่เดียวทั้งระบบ (ไม่
+# แยกต่อ PLO) ดู module docstring ด้านบนสำหรับเหตุผลที่เลือก 60.0
+PLO_ACHIEVEMENT_THRESHOLD_PERCENT = Decimal("60.0")
 
-# ผลบรรลุ PLO ข้อเดียวของนักศึกษา 1 คน (ใช้เป็นรายการย่อยใน StudentPLOAchievement ด้านล่าง)
+
+# ผลบรรลุ PLO ข้อเดียวของนักศึกษา 1 คน (ใช้เป็นรายการย่อยใน StudentPLOAchievement ด้านล่าง) -
+# achieved_percent เป็นค่าต่อเนื่อง 0-100 จริง (Workstream 3 - ค่าเฉลี่ยถ่วงน้ำหนัก ไม่ใช่ 100/0 เหมือน
+# ก่อนหน้านี้) is_achieved = achieved_percent >= PLO_ACHIEVEMENT_THRESHOLD_PERCENT
 class PLOAchievementItem(BaseModel):
     plo_id: int
     plo_code: str
@@ -153,14 +175,18 @@ class StudentPLOCourseBreakdownItem(BaseModel):
 
 def _build_plo_requirements(
     db: Session, curriculum_id: int
-) -> tuple[dict[int, dict[int, set[int]]], dict[int, Decimal]]:
+) -> tuple[dict[int, dict[int, Decimal]], dict[int, dict[int, set[int]]], dict[int, Decimal]]:
     """
-    ทำอะไร : สร้างตาราง "PLO แต่ละข้อ มี CLO อะไรบ้างเป็นหลักฐาน และ CLO เหล่านั้นสังกัดวิชาไหน" คำนวณ
-             ต่อหลักสูตรเพียงครั้งเดียว (ไม่ใช่ต่อนักศึกษา) แล้วนำผลไปใช้ซ้ำกับนักศึกษาทุกคนในรุ่น เพื่อลด
-             จำนวน query คืนค่าเป็น 2 ตัว : plo_requirements[plo_id][course_id] = เซตของ CLO id ที่ถูก
-             ผูกกับ PLO นั้นโดยตรง (ผ่าน clo_plo_mapping) และสังกัดวิชานั้น (อาจเป็นแค่บางส่วนของ CLO
-             ทั้งหมดในวิชา ไม่ใช่ทุก CLO เสมอไป — วิชาเดียวกันอาจมี CLO ที่ผูกกับ PLO อื่นแยกกัน), และ
-             clo_pass_thresholds[clo_id] = เกณฑ์ผ่านของ CLO นั้น
+    ทำอะไร : อ่านตาราง clo_plo_mapping รอบเดียว แล้วจัดเป็น 3 โครงสร้างที่ต่างกัน ให้แต่ละ caller ใช้ตาม
+             ต้องการ (คำนวณต่อหลักสูตรเพียงครั้งเดียว ไม่ใช่ต่อนักศึกษา แล้วนำผลไปใช้ซ้ำกับนักศึกษาทุกคน
+             ในรุ่น เพื่อลดจำนวน query) คืนค่าเป็น 3 ตัว :
+               1. plo_clo_weights[plo_id][clo_id] = weight_percent ของคู่ CLO-PLO นั้น (Workstream 3) -
+                  ใช้เข้าสูตร PLO_x = Σ(mastery×weight)/Σ(weight) โดยตรง **ไม่จัดกลุ่มตามวิชา**
+               2. plo_course_clo_ids[plo_id][course_id] = เซตของ CLO id ที่ผูกกับ PLO นั้นและสังกัดวิชา
+                  นั้น (โครงเดิมก่อน Workstream 3 - ยังต้องมีไว้ให้ courses.py::get_course_enrolled_
+                  students(?plo_id=) และ get_student_plo_course_breakdown ในไฟล์นี้ ที่ยังเป็น
+                  all-or-nothing ต่อวิชาเหมือนเดิม ไม่ได้เปลี่ยนตาม PLO_x)
+               3. clo_pass_thresholds[clo_id] = เกณฑ์ผ่านของ CLO นั้น (ไม่เปลี่ยน)
 
     เชื่อมกับ : - อ่านจากตาราง clo_plo_mapping, clo, course — กรองเฉพาะ CLO ของวิชาที่อยู่ในหลักสูตรนี้
                   เท่านั้น (course_plo ไม่ได้ใช้ตรงนี้แล้ว — ดูโมดูล docstring ด้านบน)
@@ -170,24 +196,32 @@ def _build_plo_requirements(
     ถ้าแก้ : เปลี่ยนที่มาของ CLO ที่นับเป็นหลักฐานตรงนี้ จะทำให้ % บรรลุ PLO เปลี่ยนทั้งระบบทันที
     """
     rows = (
-        db.query(CLOPLOMapping.plo_id, CLO.course_id, CLO.id, CLO.pass_threshold_percent)
+        db.query(
+            CLOPLOMapping.plo_id,
+            CLO.course_id,
+            CLO.id,
+            CLO.pass_threshold_percent,
+            CLOPLOMapping.weight_percent,
+        )
         .join(CLO, CLO.id == CLOPLOMapping.clo_id)
         .join(Course, Course.id == CLO.course_id)
         .filter(Course.curriculum_id == curriculum_id)
         .all()
     )
-    plo_requirements: dict[int, dict[int, set[int]]] = {}
+    plo_clo_weights: dict[int, dict[int, Decimal]] = {}
+    plo_course_clo_ids: dict[int, dict[int, set[int]]] = {}
     clo_pass_thresholds: dict[int, Decimal] = {}
-    for plo_id, course_id, clo_id, threshold in rows:
-        plo_requirements.setdefault(plo_id, {}).setdefault(course_id, set()).add(clo_id)
+    for plo_id, course_id, clo_id, threshold, weight in rows:
+        plo_clo_weights.setdefault(plo_id, {})[clo_id] = weight
+        plo_course_clo_ids.setdefault(plo_id, {}).setdefault(course_id, set()).add(clo_id)
         clo_pass_thresholds[clo_id] = threshold
-    return plo_requirements, clo_pass_thresholds
+    return plo_clo_weights, plo_course_clo_ids, clo_pass_thresholds
 
 
-def _qualifying_plo_ids(plo_requirements: dict[int, dict[int, set[int]]]) -> set[int]:
+def _qualifying_plo_ids(plo_clo_weights: dict[int, dict[int, Decimal]]) -> set[int]:
     """
     ทำอะไร : หา PLO ที่มี CLO ผูกอยู่อย่างน้อย 1 ตัวผ่านเกณฑ์การคำนวณ (คือมี key อยู่ใน
-             plo_requirements เลย — _build_plo_requirements ใส่ key เฉพาะ plo_id ที่เจอ clo_plo_mapping
+             plo_clo_weights เลย — _build_plo_requirements ใส่ key เฉพาะ plo_id ที่เจอ clo_plo_mapping
              จริงเท่านั้น)
 
     เชื่อมกับ : ใช้ตัดสินว่า PLO ข้อไหนควรถูกนับเป็นส่วนหนึ่งของ "บรรลุ PLO ครบทุกข้อ" (สถิติวงแหวนหน้า
@@ -198,7 +232,7 @@ def _qualifying_plo_ids(plo_requirements: dict[int, dict[int, set[int]]]) -> set
              ผลลัพธ์จะเปลี่ยนตามอัตโนมัติโดยไม่ต้องแก้โค้ดจุดนี้ — ถ้าลบฟังก์ชันนี้ไป วงแหวน "บรรลุครบทุก
              ข้อ" จะค้างที่ 0% เสมอ เพราะ PLO ที่ไม่มี CLO ผูกเลยเป็นไปไม่ได้อยู่แล้วโดยดีไซน์
     """
-    return {plo_id for plo_id, courses in plo_requirements.items() if courses}
+    return {plo_id for plo_id, clo_weights in plo_clo_weights.items() if clo_weights}
 
 
 def _clo_passed(
@@ -230,8 +264,9 @@ def _student_passed_course_for_plo(
              (course_clo_ids คือ CLO ของวิชาที่ถูกผูกกับ PLO นี้โดยตรงผ่าน clo_plo_mapping เท่านั้น
              อาจเป็นแค่บางส่วนของ CLO ทั้งหมดในวิชา — ดู docstring ของ _build_plo_requirements)
 
-    เชื่อมกับ : เรียก _clo_passed ทีละ CLO — ถูกเรียกโดย _student_achieved_plo และ
-                get_student_plo_course_breakdown
+    เชื่อมกับ : เรียก _clo_passed ทีละ CLO — ถูกเรียกโดย courses.py::get_course_enrolled_students และ
+                get_student_plo_course_breakdown (ยังเป็น all-or-nothing ต่อวิชาเหมือนเดิม ไม่ได้เปลี่ยน
+                ตาม PLO_x - ดู module docstring ด้านบน)
 
     ถ้าแก้ : ถ้าเปลี่ยนจาก all() เป็น any() จะทำให้ผ่านวิชาง่ายขึ้นมาก (แค่ CLO เดียวผ่านก็พอ) ซึ่ง
              ขัดกับ spec ที่ยืนยันแล้วว่าต้องผ่านทุก CLO
@@ -239,28 +274,33 @@ def _student_passed_course_for_plo(
     return all(_clo_passed(clo_id, clo_mastery, clo_pass_thresholds) for clo_id in course_clo_ids)
 
 
-def _student_achieved_plo(
-    courses_for_plo: dict[int, set[int]] | None,
-    clo_mastery: dict[int, Decimal],
-    clo_pass_thresholds: dict[int, Decimal],
-) -> bool:
+def _student_plo_score(clo_weights: dict[int, Decimal], clo_mastery: dict[int, Decimal]) -> Decimal:
     """
-    ทำอะไร : ตัดสินว่านักศึกษา "บรรลุ PLO" ข้อนี้หรือไม่ — บรรลุก็ต่อเมื่อผ่านทุกวิชาที่มี CLO ผูกกับ PLO
-             นี้ (ดึงมาจาก clo_plo_mapping แบบ global ไม่ใช่เฉพาะวิชาที่ลงทะเบียนจริง) PLO ที่ไม่มี CLO
-             ผูกอยู่เลยถือว่า "ยังไม่บรรลุ" (ไม่มีข้อมูลให้ตัดสิน ไม่ใช่ผ่านอัตโนมัติ)
+    ทำอะไร : PLO_x ของนักศึกษา 1 คน = Σ(mastery_i × weight_i) / Σ(weight_i) - สูตรหลักของ Workstream 3
+             (ดู module docstring) clo_weights คือ {clo_id: weight_percent} ของ PLO ข้อเดียว (จาก
+             plo_clo_weights[plo_id] ที่ _build_plo_requirements สร้างไว้) - CLO ที่นักศึกษาไม่มี
+             mastery เลย (ไม่เคยมีคะแนนบันทึกไว้สักชิ้นงาน) ถูกข้ามไปทั้งตัวตั้งและตัวหาร ไม่นับเป็น 0
+             (เหมือนกับที่ _clo_mastery_for_student เองก็ไม่นับ CLO ที่ไม่มีคะแนนเป็น mastery=0)
 
-    เชื่อมกับ : ใช้ courses_for_plo ที่ได้จาก _build_plo_requirements และเรียก
-                _student_passed_course_for_plo ทีละวิชา — ผลลัพธ์นี้คือค่า is_achieved ที่แสดงบนหน้า
-                ภาพรวม PLO / ผลบรรลุรายบุคคลทุกจุด
+    เชื่อมกับ : ถูกเรียกโดย _calculate_plo_achievement_from_mastery ทีละ PLO - ผลลัพธ์นี้คือค่า
+                achieved_percent ที่แสดงบนหน้าภาพรวม PLO / ผลบรรลุรายบุคคลทุกจุด
 
-    ถ้าแก้ : เป็นจุดตัดสินใจหลักของทั้งระบบ แก้ตรงนี้กระทบ is_achieved/achieved_percent ทุกที่
+    ถ้าแก้ : เป็นจุดตัดสินใจหลักของทั้งระบบ แก้ตรงนี้กระทบ achieved_percent/is_achieved ทุกที่ - ผลรวม
+             น้ำหนัก (weight_total) เป็น 0 ได้ 2 กรณี: (1) PLO นี้ไม่มี CLO ผูกอยู่เลย (clo_weights ว่าง)
+             (2) มี CLO ผูกอยู่แต่นักศึกษาไม่มี mastery ของ CLO เหล่านั้นเลยสักตัว - ทั้งสองกรณีคืน 0.0
+             เหมือนกัน (ไม่มีหลักฐานให้คำนวณ ไม่ใช่บรรลุอัตโนมัติ)
     """
-    if not courses_for_plo:
-        return False
-    return all(
-        _student_passed_course_for_plo(clo_ids, clo_mastery, clo_pass_thresholds)
-        for clo_ids in courses_for_plo.values()
-    )
+    weighted_sum = Decimal(0)
+    weight_total = Decimal(0)
+    for clo_id, weight in clo_weights.items():
+        mastery = clo_mastery.get(clo_id)
+        if mastery is None:
+            continue
+        weighted_sum += mastery * weight
+        weight_total += weight
+    if weight_total == 0:
+        return Decimal("0.0")
+    return (weighted_sum / weight_total).quantize(Decimal("0.1"))
 
 
 def _clo_mastery_for_student(
@@ -420,34 +460,31 @@ def _calculate_plo_achievement_from_mastery(
     student: Student,
     plos: list[PLO],
     clo_mastery: dict[int, Decimal],
-    plo_requirements: dict[int, dict[int, set[int]]],
-    clo_pass_thresholds: dict[int, Decimal],
+    plo_clo_weights: dict[int, dict[int, Decimal]],
 ) -> StudentPLOAchievement:
     """
     ทำอะไร : รวม CLO mastery ของนักศึกษา 1 คนขึ้นเป็นผลบรรลุ PLO ทุกข้อ (คำนวณล้วน ๆ ไม่แตะฐานข้อมูล)
-             ใช้ plo_requirements/clo_pass_thresholds ที่คำนวณไว้แล้วระดับหลักสูตร (เหมือนกันทุก
-             นักศึกษา) ร่วมกับ clo_mastery ของนักศึกษาคนนั้นที่ดึงมาก่อนหน้าแล้ว
+             ใช้ plo_clo_weights ที่คำนวณไว้แล้วระดับหลักสูตร (เหมือนกันทุกนักศึกษา) ร่วมกับ clo_mastery
+             ของนักศึกษาคนนั้นที่ดึงมาก่อนหน้าแล้ว
 
-    เชื่อมกับ : เรียก _student_achieved_plo ทีละ PLO — ถูกเรียกโดย get_cohort_plo_achievement และ
-                get_plo_achievement_by_year เพื่อให้ดึงรายชื่อ PLO และคำนวณ mastery ของทั้ง roster
-                ได้ครั้งเดียว แทนที่จะ query ซ้ำทุกครั้งต่อนักศึกษา 1 คน (รุ่นที่มีนักศึกษาจริงราว 200
-                คน เคยทำให้ backend ตอบช้าจนเกิน timeout ของ frontend แม้จะคำนวณเสร็จถูกต้องในที่สุด
-                ก็ตาม)
+    เชื่อมกับ : เรียก _student_plo_score ทีละ PLO — ถูกเรียกโดย get_plo_achievement (รายบุคคล),
+                get_cohort_plo_achievement และ get_plo_achievement_by_year เพื่อให้ดึงรายชื่อ PLO และ
+                คำนวณ mastery ของทั้ง roster ได้ครั้งเดียว แทนที่จะ query ซ้ำทุกครั้งต่อนักศึกษา 1 คน
+                (รุ่นที่มีนักศึกษาจริงราว 200 คน เคยทำให้ backend ตอบช้าจนเกิน timeout ของ frontend แม้
+                จะคำนวณเสร็จถูกต้องในที่สุดก็ตาม)
 
     ถ้าแก้ : ถ้าเปลี่ยนให้ query ข้อมูลเพิ่มในฟังก์ชันนี้ จะเสียจุดประสงค์ของการ batch ไป
     """
     achievements = []
     for plo in plos:
-        achieved = _student_achieved_plo(
-            plo_requirements.get(plo.id), clo_mastery, clo_pass_thresholds
-        )
+        score = _student_plo_score(plo_clo_weights.get(plo.id, {}), clo_mastery)
         achievements.append(
             PLOAchievementItem(
                 plo_id=plo.id,
                 plo_code=plo.code,
                 description=plo.description_th,
-                achieved_percent=100.0 if achieved else 0.0,
-                is_achieved=achieved,
+                achieved_percent=float(score),
+                is_achieved=score >= PLO_ACHIEVEMENT_THRESHOLD_PERCENT,
             )
         )
 
@@ -462,8 +499,7 @@ def _calculate_plo_achievement_from_mastery(
 def _calculate_plo_achievement_for_student(
     db: Session,
     student: Student,
-    plo_requirements: dict[int, dict[int, set[int]]],
-    clo_pass_thresholds: dict[int, Decimal],
+    plo_clo_weights: dict[int, dict[int, Decimal]],
     course_id_filter: set[int] | None = None,
 ) -> StudentPLOAchievement:
     """
@@ -483,9 +519,7 @@ def _calculate_plo_achievement_for_student(
         .all()
     )
     clo_mastery = _clo_mastery_for_student(db, student.id, course_id_filter)
-    return _calculate_plo_achievement_from_mastery(
-        student, plos, clo_mastery, plo_requirements, clo_pass_thresholds
-    )
+    return _calculate_plo_achievement_from_mastery(student, plos, clo_mastery, plo_clo_weights)
 
 
 def _aggregate_plo_percent_stats(
@@ -502,10 +536,11 @@ def _aggregate_plo_percent_stats(
              achieved_rate_percent ที่แสดงในหน้าภาพรวม PLO และ YLO ตามชั้นปีพร้อมกัน
     """
     percent_sum_by_plo: dict[int, Decimal] = {}
-    # achieved_percent is now always 100.0 or 0.0 (see module docstring), so
-    # count_with_data_by_plo below is really just achieved_count_by_plo again -
-    # kept as-is since nothing in the frontend reads student_count_with_data
-    # (the field it feeds) and this function isn't the place to drop it.
+    # achieved_percent เป็นค่าต่อเนื่องแล้ว (Workstream 3) - count_with_data_by_plo นี้จึงหมายถึง "ได้
+    # คะแนนถ่วงน้ำหนัก > 0 จริง" ไม่ใช่ "มีข้อมูลบันทึกไว้" เป๊ะๆ (นักศึกษาที่ได้ 0% ทุกชิ้นงานจะไม่ถูกนับ
+    # ทั้งที่มีข้อมูลจริง) - ปล่อยไว้แบบนี้ต่อเพราะ nothing in the frontend reads student_count_with_data
+    # (the field it feeds) ตรวจสอบแล้ว ไม่คุ้มเพิ่ม field ใหม่ (has_data) ให้ PLOAchievementItem แค่เพื่อ
+    # metric ที่ไม่มีใครอ่าน
     count_with_data_by_plo: dict[int, int] = {}
     achieved_count_by_plo: dict[int, int] = {}
 
@@ -568,8 +603,10 @@ def get_plo_achievement(
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, student.curriculum_id)
-    return _calculate_plo_achievement_for_student(db, student, plo_requirements, clo_pass_thresholds)
+    plo_clo_weights, _plo_course_clo_ids, _clo_pass_thresholds = _build_plo_requirements(
+        db, student.curriculum_id
+    )
+    return _calculate_plo_achievement_for_student(db, student, plo_clo_weights)
 
 
 @router.get(
@@ -599,8 +636,10 @@ def get_student_plo_course_breakdown(
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, student.curriculum_id)
-    courses_for_plo = plo_requirements.get(plo_id)
+    _plo_clo_weights, plo_course_clo_ids, clo_pass_thresholds = _build_plo_requirements(
+        db, student.curriculum_id
+    )
+    courses_for_plo = plo_course_clo_ids.get(plo_id)
     if not courses_for_plo:
         return []
 
@@ -657,8 +696,10 @@ def get_cohort_plo_achievement(
         .all()
     )
 
-    plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, curriculum_id)
-    qualifying_plo_ids = _qualifying_plo_ids(plo_requirements)
+    plo_clo_weights, _plo_course_clo_ids, _clo_pass_thresholds = _build_plo_requirements(
+        db, curriculum_id
+    )
+    qualifying_plo_ids = _qualifying_plo_ids(plo_clo_weights)
 
     available_cohort_years = sorted(
         {
@@ -708,7 +749,7 @@ def get_cohort_plo_achievement(
     clo_mastery_by_student = _clo_mastery_for_students_batch(db, student_ids)
     student_achievements = [
         _calculate_plo_achievement_from_mastery(
-            student, plos, clo_mastery_by_student.get(student.id, {}), plo_requirements, clo_pass_thresholds
+            student, plos, clo_mastery_by_student.get(student.id, {}), plo_clo_weights
         )
         for student in students
     ]
@@ -770,7 +811,7 @@ def get_plo_achievement_by_year(
     current_user: User = Depends(get_current_user),
 ):
     """
-    ทำอะไร : คำนวณผลบรรลุ PLO แบบ all-or-nothing เหมือน /achievement/cohort ทุกประการ แต่รันแยกทีละ
+    ทำอะไร : คำนวณผลบรรลุ PLO ด้วยสูตรถ่วงน้ำหนักเดียวกับ /achievement/cohort ทุกประการ แต่รันแยกทีละ
              ชั้นปี (1-4) โดยนับเฉพาะคะแนนวิชาที่อยู่ใน study_plan ของปีนั้น — แต่ละปีจึงสะท้อนสิ่งที่
              สอนในปีนั้นจริง ๆ ไม่ใช่ยอดสะสมทั้งหมด พร้อมทั้งบอกด้วยว่า PLO ข้อไหนที่ YLO ของปีนั้น
              คาดหวังไว้ (is_expected_this_year)
@@ -779,11 +820,11 @@ def get_plo_achievement_by_year(
                 course_id_filter ต่อปี) — เรียกโดยหน้า "YLO ตามชั้นปี" เพื่อดึง course_count ต่อปี
                 (ตัวเลข achievement ของ endpoint นี้เองยังไม่ถูกแสดงผลที่ไหนใน UI ปัจจุบัน)
 
-    ถ้าแก้ : ข้อควรระวัง — วิชาที่ "บังคับ" สำหรับ PLO หนึ่ง (plo_requirements) ยังเป็นชุดข้อมูล
-             curriculum-global ไม่ได้ scope ตามปี ดังนั้น PLO ที่มีวิชาบังคับกระจายหลายปี จะขึ้นเป็น
-             "ยังไม่บรรลุ" ในทุกปีย่อย เว้นแต่วิชาบังคับทั้งหมดของ PLO นั้นบังเอิญอยู่ในปีเดียวกัน — เป็น
-             quirk ที่รู้แล้วและตั้งใจไม่แก้เพิ่มความซับซ้อน เพราะตัวเลขบรรลุของ endpoint นี้ยังไม่ถูก
-             render ที่ไหนใน UI
+    ถ้าแก้ : ข้อควรระวัง — CLO ที่ผูกกับ PLO หนึ่ง (plo_clo_weights) ยังเป็นชุดข้อมูล curriculum-global
+             ไม่ได้ scope ตามปี ดังนั้น PLO ที่มี CLO หลักฐานกระจายหลายปี คะแนนถ่วงน้ำหนักของปีย่อยแต่ละ
+             ปีจะนับเฉพาะ mastery ของ CLO ที่มีคะแนนในปีนั้น (course_id_filter) เท่านั้น ไม่ใช่ภาพรวมทั้ง
+             หลักสูตร — เป็น quirk ที่รู้แล้วและตั้งใจไม่แก้เพิ่มความซับซ้อน เพราะตัวเลขบรรลุของ endpoint
+             นี้ยังไม่ถูก render ที่ไหนใน UI
     """
     curriculum = db.get(Curriculum, curriculum_id)
     if curriculum is None:
@@ -791,7 +832,9 @@ def get_plo_achievement_by_year(
 
     plos = db.query(PLO).filter(PLO.curriculum_id == curriculum_id).order_by(PLO.code).all()
 
-    plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, curriculum_id)
+    plo_clo_weights, _plo_course_clo_ids, _clo_pass_thresholds = _build_plo_requirements(
+        db, curriculum_id
+    )
 
     available_cohort_years = sorted(
         {
@@ -872,7 +915,7 @@ def get_plo_achievement_by_year(
         )
         student_achievements = [
             _calculate_plo_achievement_from_mastery(
-                student, plos, clo_mastery_by_student.get(student.id, {}), plo_requirements, clo_pass_thresholds
+                student, plos, clo_mastery_by_student.get(student.id, {}), plo_clo_weights
             )
             for student in students
         ]

@@ -141,8 +141,10 @@ def get_course_enrolled_students(
 
     plo_achieved_by_student_id: dict[str, bool | None] = {}
     if plo_id is not None and students:
-        plo_requirements, clo_pass_thresholds = _build_plo_requirements(db, course.curriculum_id)
-        course_clo_ids = plo_requirements.get(plo_id, {}).get(course_id, set())
+        _plo_clo_weights, plo_course_clo_ids, clo_pass_thresholds = _build_plo_requirements(
+            db, course.curriculum_id
+        )
+        course_clo_ids = plo_course_clo_ids.get(plo_id, {}).get(course_id, set())
         if course_clo_ids:
             student_ids = [s.id for s in students]
             clo_mastery_by_student = _clo_mastery_for_students_batch(

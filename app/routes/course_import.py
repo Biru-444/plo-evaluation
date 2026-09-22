@@ -29,6 +29,12 @@
 
          เพิ่มนามสกุลไฟล์ใหม่ที่ Phase 1 รองรับ ต้องเพิ่มใน ALLOWED_EXTENSIONS ด้วย ไม่งั้นโดน 400
          ปฏิเสธตั้งแต่ต้น
+
+         weight_percent ของแต่ละคู่ CLO-PLO (Workstream 3) เป็นหน้าที่ของ frontend ล้วนๆ (auto-fill
+         เกลี่ยเท่ากันเอง + ให้แอดมินแก้มือได้ก่อนกด "ยืนยันบันทึก" - ดู AdminCourseImportMCO3.jsx) Phase
+         1/Gemini ไม่รู้จัก field นี้เลย (ดู MCO3CLOPLOMappingItem vs MCO3CLOPLOMappingSaveItem ใน
+         app/schemas/course_import.py - คนละ schema กัน) Phase 2 ที่นี่แค่รับค่าที่ frontend คำนวณมาแล้ว
+         ส่งต่อเข้า CLOPLOMapping ตรงๆ ไม่มีการ auto-fill/rebalance เพิ่มอีกชั้น
 """
 from __future__ import annotations
 
@@ -212,6 +218,7 @@ def save_course_from_mco3(
                 CLOPLOMapping(
                     clo_id=clo_id_by_code[mapping.clo_code],
                     plo_id=plo_id_by_code[mapping.plo_code],
+                    weight_percent=mapping.weight_percent,
                 )
             )
 
