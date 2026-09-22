@@ -34,16 +34,15 @@
 from __future__ import annotations
 
 import io
-import os
 
 from docx import Document
 from docx.oxml.ns import qn
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-from google import genai
 from google.genai import types
 
 from app.schemas.course_import import CourseImportFromMCO3Response
+from app.services.gemini_client import build_gemini_client
 
 SYSTEM_INSTRUCTION = """\
 คุณคือผู้ช่วยแกะข้อมูลวิชาจากเอกสาร มคอ.3 (รายละเอียดของรายวิชา) ของมหาวิทยาลัยไทย ให้เป็น JSON
@@ -139,18 +138,11 @@ SYSTEM_INSTRUCTION = """\
 ตอบเป็น JSON ตาม schema เท่านั้น ห้ามมีข้อความอื่นนอก JSON"""
 
 
-def _build_client() -> genai.Client:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY environment variable is not set")
-    return genai.Client(api_key=api_key)
-
-
 def _run_extraction(document_content, curriculum_name: str) -> CourseImportFromMCO3Response:
     """ส่วนที่ใช้ร่วมกันระหว่าง path .pdf (ส่ง Part.from_bytes) กับ .docx (ส่ง text ที่แกะไว้แล้วเป็น
     string ธรรมดา) - document_content คือ types.Part หรือ str ก็ได้ (google-genai SDK รับ str ใน
     contents list แล้วห่อเป็น text part ให้อัตโนมัติ)"""
-    client = _build_client()
+    client = build_gemini_client()
 
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",

@@ -35,6 +35,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from google.genai.errors import APIError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -115,6 +116,13 @@ async def import_course_from_mco3(
             result = import_course_from_mco3_docx(content_bytes, curriculum.name)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except APIError as exc:
+        # google-genai ยิง exception ประเภทนี้เองตอน Gemini API ตอบ error กลับมา (เช่น 503 "high
+        # demand", 429 rate limit) - ไม่ใช่ RuntimeError เลยไม่ถูก except ด้านบนจับ ถ้าไม่ดักไว้ตรงนี้
+        # exception จะหลุดเป็น 500 ดิบๆ ที่ไม่มี CORS header (Starlette ไม่ใส่ header ตอน unhandled
+        # exception) เบราว์เซอร์เลยรายงานผิดเป็น "CORS policy" แทนที่จะเป็น 500/502 จริง (พบจริงตอน
+        # ทดสอบ Workstream 2 ที่ใช้ pattern เดียวกันนี้ - ดู แผนการแก้ไขครั้งใหญ่-PLO-CLO.md)
+        raise HTTPException(status_code=502, detail=f"เรียก Gemini ไม่สำเร็จ: {exc}") from exc
 
     return _add_domain_category_mismatch_flags(db, curriculum_id, result)
 

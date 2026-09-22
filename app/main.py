@@ -25,6 +25,7 @@ from app.routes import (
     course_plo,
     courses,
     curriculum,
+    curriculum_import,
     enrollment,
     item_clo,
     plo,
@@ -95,6 +96,7 @@ def health_check():
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(curriculum.router)
+app.include_router(curriculum_import.router)
 # plo_calculation.router's literal /plo/achievement(/cohort) paths must be
 # registered before plo.router's /plo/{plo_id} - Starlette matches routes in
 # registration order, and the dynamic segment would otherwise shadow them.
