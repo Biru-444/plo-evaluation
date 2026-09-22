@@ -1,0 +1,130 @@
+"""
+Tests สำหรับ POST /courses/import-from-mco3 (app/routes/course_import.py) - ครอบคลุมส่วนที่เพิ่มมา
+ในรอบอัปเดต Phase 1 (คำสั่ง-อัปเดต-mco3-import-phase1.md): รองรับ .docx, flag 6 แบบ, ฟิลด์
+domain/instructor_name/semester_display
+
+Test เหล่านี้เรียก Gemini API จริง (ไม่ mock) ตามไฟล์ตัวอย่างจริงใน
+tests/fixtures/mco3_samples/ - ข้ามอัตโนมัติถ้าไม่มี GEMINI_API_KEY ตั้งไว้ (เช่นตอนรัน CI ที่ไม่มี
+key) เพื่อไม่ให้ `pytest tests/` ทั้งชุดพังเฉยๆ สำหรับคนที่ไม่มี key
+
+หมายเหตุสำคัญ : ไม่มี test สำหรับ flag "title_content_mismatch" ในไฟล์นี้ - สเปกเดิมคาดว่าไฟล์
+4131301-datastructure-title-mismatch.pdf ควรได้ flag นี้ แต่ตรวจสอบแล้ว (ถาม Gemini ตรงๆ 3 คำถามแยกกัน
+เทียบ header/เนื้อหา, ค้นหาคำว่า "4131301" ทั้งเอกสาร, เทียบ header/footer ทุกหน้า) ไฟล์จริงไม่มี
+ความขัดแย้งระหว่างหัวเรื่องกับเนื้อหาเลย (เนื้อหาทั้งฉบับสอดคล้องกันเป็นวิชา 4122305 โครงสร้างข้อมูล
+ตลอด) - ผู้ใช้ยืนยันแล้ว (2026-09-22) ให้เว้น flag นี้ไว้ก่อนจนกว่าจะมีไฟล์ตัวอย่างจริงที่มีสถานการณ์นี้จริง
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from app.models import Curriculum
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "mco3_samples"
+
+requires_gemini_key = pytest.mark.skipif(
+    not os.getenv("GEMINI_API_KEY"),
+    reason="GEMINI_API_KEY not set - skipping tests that call the real Gemini API",
+)
+
+
+@pytest.fixture()
+def cs_curriculum(db_session):
+    """หลักสูตรที่ตรงกับเนื้อหาจริงของไฟล์ตัวอย่างทั้งหมด (ทุกไฟล์เป็นวิชาของหลักสูตรวิทยาการ
+    คอมพิวเตอร์) - ตั้งชื่อให้ตรงเพื่อไม่ให้ flag "curriculum_mismatch" ติดมาปนกับ flag ที่กำลังทดสอบ"""
+    curriculum = Curriculum(
+        name="หลักสูตรวิทยาศาสตรบัณฑิต สาขาวิชาวิทยาการคอมพิวเตอร์ (หลักสูตรปรับปรุง พ.ศ. 2566)",
+        year=2566,
+    )
+    db_session.add(curriculum)
+    db_session.commit()
+    db_session.refresh(curriculum)
+    return curriculum
+
+
+def _import_sample(client, filename: str, curriculum_id: int, content_type: str):
+    with open(FIXTURES_DIR / filename, "rb") as f:
+        data = f.read()
+    resp = client.post(
+        "/courses/import-from-mco3",
+        files={"file": (filename, data, content_type)},
+        data={"curriculum_id": str(curriculum_id)},
+    )
+    return resp
+
+
+@requires_gemini_key
+def test_database_v2_flags_checkbox_ambiguous_with_total_count(client, cs_curriculum):
+    """4122304-database-v2-with-total-column.pdf - ตาราง PLOxCLO แบบกาเครื่องหมายที่มีคอลัมน์ "รวม"
+    ต้องได้ flag checkbox_ambiguous และข้อความต้องแนบตัวเลขรวมที่เจอด้วย (ไม่ใช่แค่บอกว่าอ่านไม่ออกเฉยๆ)"""
+    resp = _import_sample(
+        client, "4122304-database-v2-with-total-column.pdf", cs_curriculum.id, "application/pdf"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["course_code"] == "4122304"
+    assert body["clo_plo_mapping"] == []
+
+    checkbox_flags = [f for f in body["flags"] if f["type"] == "checkbox_ambiguous"]
+    assert len(checkbox_flags) == 1
+    assert "รวม" in checkbox_flags[0]["message"]
+
+    # ไฟล์นี้มี (K)/(S)/(A)/(C) กำกับ CLO ชัดเจน - domain ต้องไม่ใช่ null ทั้งหมด
+    domains = [c["domain"] for c in body["clos"]]
+    assert any(d is not None for d in domains)
+
+
+@requires_gemini_key
+def test_uxui_flags_duplicate_course_code(client, cs_curriculum):
+    """4122301-uxui-duplicate-code.pdf - รหัสวิชาในหมวดที่ 1 (4122301) ไม่ตรงกับหมวดที่ 2 (4123310)
+    ต้องได้ flag duplicate_course_code ระบุทั้งสองค่าที่ขัดแย้งกัน"""
+    resp = _import_sample(client, "4122301-uxui-duplicate-code.pdf", cs_curriculum.id, "application/pdf")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    duplicate_flags = [f for f in body["flags"] if f["type"] == "duplicate_course_code"]
+    assert len(duplicate_flags) == 1
+    assert "4122301" in duplicate_flags[0]["message"]
+    assert "4123310" in duplicate_flags[0]["message"]
+
+
+@requires_gemini_key
+def test_aunqa_docx_succeeds_and_flags_plo_mapping_not_filled(client, cs_curriculum):
+    """4123501-aunqa-empty-mapping.docx - path .docx ต้องผ่านสำเร็จ (200, ไม่ error) และตาราง PLO-CLO
+    ที่ว่างเปล่าทั้งตารางต้องได้ flag plo_mapping_not_filled ไม่ใช่ checkbox_ambiguous (คนละสาเหตุกัน)"""
+    resp = _import_sample(
+        client,
+        "4123501-aunqa-empty-mapping.docx",
+        cs_curriculum.id,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["course_code"] == "4123501"
+    assert body["clo_plo_mapping"] == []
+    assert body["instructor_name"] is not None
+    assert body["semester_display"] is not None
+
+    flag_types = {f["type"] for f in body["flags"]}
+    assert "plo_mapping_not_filled" in flag_types
+    assert "checkbox_ambiguous" not in flag_types
+
+    # ไฟล์นี้มี (k)/(S) กำกับ CLO1-4 ชัดเจน (CLO5 มี "(E/C)" ที่ไม่มาตรฐาน ต้องเป็น null) -
+    # domain ต้องไม่ใช่ null ทั้งหมด
+    domains = [c["domain"] for c in body["clos"]]
+    assert any(d is not None for d in domains)
+
+
+def test_rejects_unsupported_file_extension(client, cs_curriculum):
+    """นามสกุลไฟล์ที่ไม่รองรับ (เช่น .txt) ต้องโดน 400 ก่อนเรียก Gemini เลย ไม่ใช่ error อื่น - ไม่ต้อง
+    skip ตาม GEMINI_API_KEY เพราะ endpoint ปฏิเสธก่อนเรียก Gemini เสมอ"""
+    resp = client.post(
+        "/courses/import-from-mco3",
+        files={"file": ("notes.txt", b"random text content", "text/plain")},
+        data={"curriculum_id": str(cs_curriculum.id)},
+    )
+    assert resp.status_code == 400
