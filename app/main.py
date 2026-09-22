@@ -20,6 +20,7 @@ from app.routes import (
     clo,
     clo_calculation,
     clo_plo_mapping,
+    course_import,
     course_offering,
     course_plo,
     courses,
@@ -104,6 +105,7 @@ app.include_router(ylo.router)
 app.include_router(ylo_calculation.router)
 app.include_router(ylo_plo_mapping.router)
 app.include_router(courses.router)
+app.include_router(course_import.router)
 app.include_router(course_plo.router)
 app.include_router(study_plan.router)
 app.include_router(course_offering.router)
