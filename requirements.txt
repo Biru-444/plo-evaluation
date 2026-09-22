@@ -15,6 +15,8 @@ olefile==0.47  # สำรองแกะ stream ตรงๆ เมื่อไ
 google-genai==1.2.0  # ปักหมุดต่ำกว่าเวอร์ชันล่าสุดโดยตั้งใจ - เวอร์ชันใหม่กว่านี้ต้องการ
                      # anyio>=4.8/httpx>=0.28.1/pydantic>=2.12.5 ซึ่งชนกับ fastapi==0.104.1 ด้านบน
                      # (ดูคำอธิบายเต็มใน app/services/mco3_import_service.py)
+python-docx==1.2.0  # แปลง .docx เป็น plain text สำหรับ POST /courses/import-from-mco3 - เช็คแล้วว่า
+                    # เข้ากับ pin เดิมทั้งหมดได้ ไม่มี anyio/httpx/pydantic เหมือน google-genai
 
 # Testing
 pytest==7.4.3

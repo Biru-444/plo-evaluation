@@ -26,8 +26,13 @@
 """
 from __future__ import annotations
 
+import io
 import os
 
+from docx import Document
+from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from google import genai
 from google.genai import types
 
@@ -87,15 +92,16 @@ def _build_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-def import_course_from_mco3_pdf(pdf_bytes: bytes, curriculum_name: str) -> CourseImportFromMCO3Response:
-    """แกะข้อมูลวิชาจากไฟล์ มคอ.3 (PDF, เป็น bytes) ด้วย Gemini คืนค่าเป็น
-    CourseImportFromMCO3Response ที่ validate แล้ว - ไม่แตะ DB เลย (Phase 1)"""
+def _run_extraction(document_content, curriculum_name: str) -> CourseImportFromMCO3Response:
+    """ส่วนที่ใช้ร่วมกันระหว่าง path .pdf (ส่ง Part.from_bytes) กับ .docx (ส่ง text ที่แกะไว้แล้วเป็น
+    string ธรรมดา) - document_content คือ types.Part หรือ str ก็ได้ (google-genai SDK รับ str ใน
+    contents list แล้วห่อเป็น text part ให้อัตโนมัติ)"""
     client = _build_client()
 
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
         contents=[
-            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+            document_content,
             f"หลักสูตรเป้าหมายที่แอดมินเลือกไว้ตอนอัปโหลดไฟล์นี้คือ: \"{curriculum_name}\"",
         ],
         config=types.GenerateContentConfig(
@@ -109,3 +115,54 @@ def import_course_from_mco3_pdf(pdf_bytes: bytes, curriculum_name: str) -> Cours
         raise RuntimeError(f"Gemini ไม่คืนผลลัพธ์ตาม schema ที่กำหนด: {response.text!r}")
 
     return response.parsed
+
+
+def import_course_from_mco3_pdf(pdf_bytes: bytes, curriculum_name: str) -> CourseImportFromMCO3Response:
+    """แกะข้อมูลวิชาจากไฟล์ มคอ.3 (PDF, เป็น bytes) ด้วย Gemini คืนค่าเป็น
+    CourseImportFromMCO3Response ที่ validate แล้ว - ไม่แตะ DB เลย (Phase 1)"""
+    part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+    return _run_extraction(part, curriculum_name)
+
+
+def _iter_block_items(document: Document):
+    """เดินเอกสาร .docx ตามลำดับจริงในไฟล์ (ย่อหน้า/ตาราง สลับกันได้) - python-docx เวอร์ชันพื้นฐาน
+    แยก document.paragraphs กับ document.tables ให้แยกกันเฉยๆ ไม่เรียงตามลำดับจริง เทคนิคนี้เดิน
+    XML element ของ document.element.body ตรงๆ แทน เป็นแพทเทิร์นมาตรฐานของ python-docx สำหรับกรณีนี้"""
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            yield Paragraph(child, document)
+        elif child.tag == qn("w:tbl"):
+            yield Table(child, document)
+
+
+def _extract_docx_text(docx_bytes: bytes) -> str:
+    """แปลง .docx เป็น plain text เรียงตามลำดับเอกสารจริง ไม่รักษา formatting (ไม่จำเป็นสำหรับงานนี้)
+    ตารางแปลงเป็นแถวละ 1 บรรทัด คั่นแต่ละคอลัมน์ด้วย " | " - เซลล์ว่างจะเห็นเป็นช่องว่างระหว่าง | สองตัว
+    ตรงๆ (ไม่ตัดทิ้ง) เพื่อให้ Gemini แยกออกว่าตารางไหน "มีโครงแต่ไม่มีใครกรอก" ได้ (ดู flag
+    plo_mapping_not_filled ใน SYSTEM_INSTRUCTION)"""
+    document = Document(io.BytesIO(docx_bytes))
+    lines: list[str] = []
+    for block in _iter_block_items(document):
+        if isinstance(block, Paragraph):
+            text = block.text.strip()
+            if text:
+                lines.append(text)
+        else:
+            for row in block.rows:
+                lines.append(" | ".join(cell.text.strip() for cell in row.cells))
+            lines.append("")
+    return "\n".join(lines)
+
+
+def import_course_from_mco3_docx(docx_bytes: bytes, curriculum_name: str) -> CourseImportFromMCO3Response:
+    """แกะข้อมูลวิชาจากไฟล์ มคอ.3 (.docx, เป็น bytes) ด้วย Gemini - ต่างจาก .pdf ตรงที่แปลงเป็น
+    plain text ด้วย python-docx ก่อนแล้วค่อยส่งเป็น text (ไม่ใช่ inline file) เพราะ Gemini ไม่รับ
+    .docx เป็น inline data โดยตรง"""
+    text = _extract_docx_text(docx_bytes)
+    wrapped = (
+        "ข้อความต่อไปนี้คือเนื้อหาที่แกะออกมาจากไฟล์ .docx (Word) ของเอกสาร มคอ.3 แล้วด้วยโปรแกรม "
+        "ไม่ใช่ภาพต้นฉบับ - ตารางในเอกสารถูกแปลงเป็นข้อความแถวละ 1 บรรทัด แต่ละคอลัมน์คั่นด้วย \" | \" "
+        "เซลล์ที่ไม่มีข้อความอยู่เลยระหว่างเครื่องหมาย | หมายความว่าช่องนั้นว่างเปล่าจริงๆ ในเอกสารต้นฉบับ "
+        "(ไม่ใช่ปัญหาจากการแกะข้อความ)\n\n" + text
+    )
+    return _run_extraction(wrapped, curriculum_name)
