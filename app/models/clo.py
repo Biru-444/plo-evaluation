@@ -28,6 +28,10 @@ class CLO(Base):
     pass_threshold_percent: Mapped[Decimal] = mapped_column(
         Numeric(5, 2), nullable=False, server_default="60.00"
     )
+    # โดเมนการเรียนรู้ของ CLO ข้อนี้ (มักกำกับด้วยวงเล็บ (K)/(S)/(A)/(C) ในเอกสาร มคอ.3) - nullable
+    # เสมอ ห้าม backfill ค่าเดาให้ CLO เก่า (ดู scripts/migrate_add_clo_domain.py) ค่าที่รับจริงจำกัด
+    # แค่ 4 แบบ ("knowledge"/"skills"/"ethics"/"character") ที่ระดับ Pydantic เท่านั้น ไม่ใช่ ENUM ของ DB
+    domain: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # อาจารย์/แอดมินผู้สร้าง CLO นี้ — RESTRICT กันการลบผู้ใช้ที่ยังมี CLO ผูกอยู่
     created_by: Mapped[int] = mapped_column(
         ForeignKey("user.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=False

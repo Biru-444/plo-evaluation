@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+CLODomain = Literal["knowledge", "skills", "ethics", "character"]
 
 
 class CLOSchema(BaseModel):
@@ -15,6 +18,7 @@ class CLOSchema(BaseModel):
     code: str
     description: str
     pass_threshold_percent: Decimal
+    domain: CLODomain | None = None
     created_by: int
 
 
