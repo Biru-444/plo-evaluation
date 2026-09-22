@@ -1,17 +1,30 @@
 """
-ทำอะไร : Phase 1 ของฟีเจอร์ "นำเข้าข้อมูลวิชาจาก มคอ.3 ด้วย AI" — รับไฟล์ .pdf หรือ .docx (มคอ.3) +
-         curriculum_id ที่แอดมินเลือกไว้ ส่งให้ Gemini แกะข้อมูลวิชา/CLO/CLO-PLO mapping ออกมาเป็น
-         JSON คืนกลับให้ frontend แสดงหน้าตรวจสอบก่อนเสมอ (Phase 1 นี้ไม่เขียนอะไรลง DB เลย - ดู TASK
-         ต้นทางที่สั่งงานนี้)
+ทำอะไร : ฟีเจอร์ "นำเข้าข้อมูลวิชาจาก มคอ.3 ด้วย AI" — Phase 1 (POST /courses/import-from-mco3) รับ
+         ไฟล์ .pdf/.docx + curriculum_id ส่งให้ Gemini แกะข้อมูลวิชา/CLO/CLO-PLO mapping ออกมาเป็น
+         JSON ให้ frontend แสดงหน้าตรวจสอบ (ไม่เขียน DB เลย) - Phase 2 (POST
+         /courses/import-from-mco3/save) รับผลลัพธ์ที่แอดมินตรวจ/แก้ไขแล้วจากหน้านั้น มาบันทึกจริง
+         เป็น Course + CLO + CLOPLOMapping (ไม่เรียก Gemini ซ้ำ ไม่แตะไฟล์ต้นฉบับอีกแล้ว)
 
-เชื่อมกับ : เรียก app.services.mco3_import_service ล้วนๆ (import_course_from_mco3_pdf สำหรับ .pdf,
-            import_course_from_mco3_docx สำหรับ .docx) ไม่มี logic เรียก Gemini/แกะไฟล์อยู่ในไฟล์นี้
-            เอง ไฟล์นี้มีหน้าที่แค่รับ request/เช็คสิทธิ์/เช็คนามสกุลไฟล์/หา curriculum ที่เลือกไว้ (ใช้
-            ชื่อหลักสูตรไปเทียบ curriculum_mismatch ใน service)
+เชื่อมกับ : Phase 1 เรียก app.services.mco3_import_service ล้วนๆ ไม่มี logic เรียก Gemini/แกะไฟล์อยู่
+            ในไฟล์นี้เอง - Phase 2 ไม่เรียก service นั้นเลย เขียน object (Course/CLO/CLOPLOMapping)
+            ตรงๆ ในทรานแซกชันเดียว เลียนแบบแพทเทิร์นเดียวกับ create_clo ใน app/routes/clo.py (db.add
+            course -> db.flush() เอา id -> db.add CLO ทีละตัว -> db.flush() เอา id -> db.add
+            CLOPLOMapping -> db.commit() ครั้งเดียวตอนจบ) เพื่อให้ atomic จริง (พังตรงไหนก็ rollback
+            หมดทั้งก้อน ไม่ทิ้ง course ที่ไม่มี CLO ค้างไว้)
 
-ถ้าแก้ : สิทธิ์ตั้งใจให้ admin เท่านั้น (require_role("admin")) เพราะเป็นฟีเจอร์เตรียมนำเข้าข้อมูล
-         หลักสูตร/วิชาระดับระบบ - Phase 2 (endpoint บันทึกจริง) และ Phase 3 (หน้าจอ frontend) ยังไม่ทำ
-         ในรอบนี้ เพิ่มนามสกุลไฟล์ใหม่ที่รองรับ ต้องเพิ่มใน ALLOWED_EXTENSIONS ด้วย ไม่งั้นโดน 400
+ถ้าแก้ : สิทธิ์ทั้งสอง endpoint ตั้งใจให้ admin เท่านั้น (require_role("admin")) เพราะเป็นฟีเจอร์เตรียม
+         นำเข้าข้อมูลหลักสูตร/วิชาระดับระบบ ไม่ใช่งานแก้ไขวิชาที่ตัวเองสอนแบบ create_clo ทั่วไป (course
+         ที่เพิ่ง import ยังไม่มี course_offering ให้เช็ค ownership ด้วยซ้ำ)
+
+         Phase 2 เป็น create-only โดยตั้งใจ (ตัดสินใจแล้ว 2026-09-22) - รหัสวิชาชนกับที่มีอยู่แล้วใน
+         หลักสูตร = 409 ตรงๆ ไม่มี update/merge mode ให้แอดมินไปแก้ผ่านหน้าจัดการวิชาปกติแทน ถ้าต้องการ
+         update-mode ในอนาคตต้องออกแบบแยกต่างหาก (มีนัยเรื่อง CLO ที่มีอยู่แล้วบางส่วน vs ใหม่ทั้งหมด)
+
+         flags[]/instructor_name/semester_display ของ Phase 1 ไม่ถูกส่งมาที่นี่เลย (ไม่มีในสคีมา
+         CourseImportSaveRequest) เพราะไม่ต้องเก็บเป็น audit trail และไม่มีคอลัมน์ปลายทางให้เก็บ -
+         ทิ้งได้เลยหลังแอดมินตรวจในหน้า Phase 3 เสร็จ ห้ามเพิ่มโค้ดมาบันทึกย้อนหลังโดยไม่ปรึกษาก่อน
+
+         เพิ่มนามสกุลไฟล์ใหม่ที่ Phase 1 รองรับ ต้องเพิ่มใน ALLOWED_EXTENSIONS ด้วย ไม่งั้นโดน 400
          ปฏิเสธตั้งแต่ต้น
 """
 from __future__ import annotations
@@ -19,12 +32,19 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import require_role
 from app.database import get_db
-from app.models import Curriculum, User
-from app.schemas.course_import import CourseImportFromMCO3Response
+from app.models import CLO, CLOPLOMapping, Course, Curriculum, PLO, User
+from app.schemas.clo import CLOSchema
+from app.schemas.course import CourseSchema
+from app.schemas.course_import import (
+    CourseImportFromMCO3Response,
+    CourseImportSaveRequest,
+    CourseImportSaveResponse,
+)
 from app.services.mco3_import_service import (
     import_course_from_mco3_docx,
     import_course_from_mco3_pdf,
@@ -64,3 +84,108 @@ async def import_course_from_mco3(
         return import_course_from_mco3_docx(content_bytes, curriculum.name)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/import-from-mco3/save", response_model=CourseImportSaveResponse, status_code=201)
+def save_course_from_mco3(
+    payload: CourseImportSaveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    curriculum = db.get(Curriculum, payload.curriculum_id)
+    if curriculum is None:
+        raise HTTPException(status_code=404, detail="Curriculum not found")
+
+    # create-only โดยตั้งใจ (ไม่มี update/merge mode ในรอบนี้ - ดู module docstring) เช็คก่อนแตะ DB
+    # เพื่อให้ข้อความ error ชัดกว่าปล่อยให้ IntegrityError คุมแทน (บอก course_id ที่ชนได้ตรงๆ)
+    existing_course = (
+        db.query(Course)
+        .filter(Course.curriculum_id == payload.curriculum_id, Course.course_code == payload.course_code)
+        .first()
+    )
+    if existing_course is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"รหัสวิชา {payload.course_code} มีอยู่แล้วในหลักสูตรนี้ "
+                f"(course_id={existing_course.id}) - กรุณาแก้ไขผ่านหน้าจัดการวิชาแทน"
+            ),
+        )
+
+    # ตรวจ reference ของ clo_plo_mapping ก่อนแตะ DB เช่นกัน (400 ชัดเจนแทน IntegrityError คลุมเครือ) -
+    # clo_code ต้องอยู่ใน clos ของ payload นี้เอง, plo_code ต้องมีอยู่จริงในหลักสูตรเป้าหมาย
+    clo_codes_in_payload = {clo_item.code for clo_item in payload.clos}
+    unknown_clo_refs = sorted(
+        {m.clo_code for m in payload.clo_plo_mapping if m.clo_code not in clo_codes_in_payload}
+    )
+    if unknown_clo_refs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"clo_plo_mapping อ้างถึง clo_code ที่ไม่มีอยู่ใน clos ของคำขอนี้: {unknown_clo_refs}",
+        )
+
+    plo_id_by_code: dict[str, int] = dict(
+        db.query(PLO.code, PLO.id).filter(PLO.curriculum_id == payload.curriculum_id).all()
+    )
+    unknown_plo_refs = sorted(
+        {m.plo_code for m in payload.clo_plo_mapping if m.plo_code not in plo_id_by_code}
+    )
+    if unknown_plo_refs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"clo_plo_mapping อ้างถึง plo_code ที่ไม่มีอยู่ในหลักสูตรนี้: {unknown_plo_refs}",
+        )
+
+    # ทุกอย่างตั้งแต่ course ถึง commit อยู่ใน try เดียวกัน - db.flush() (ใช้เอา id ที่ถูก generate มา
+    # อ้างอิงต่อ ก่อนจะ commit จริง) ก็ยิง SQL ไป DB จริงและ raise IntegrityError ได้ทันทีเหมือนกัน ไม่ใช่
+    # แค่ db.commit() ท้ายสุด - ถ้า except ครอบแค่ commit() เฉยๆ error จาก flush() ระหว่างทางจะหลุดออกไป
+    # เป็น 500 ที่ไม่ได้ rollback ให้สะอาด (พบจริงตอนเขียน test_save_is_atomic_nothing_persists_when_
+    # clo_codes_collide_within_payload - CLO รหัสซ้ำกันเองในคำขอชนกันตอน flush ตัวที่สอง ไม่ใช่ตอน commit)
+    try:
+        course = Course(
+            curriculum_id=payload.curriculum_id,
+            course_code=payload.course_code,
+            name_th=payload.name_th,
+            name_en=payload.name_en,
+            credit=payload.credit,
+            category=payload.category,
+        )
+        db.add(course)
+        db.flush()  # ต้องมี course.id ก่อนสร้าง CLO ที่อ้างถึง
+
+        clo_id_by_code: dict[str, int] = {}
+        for clo_item in payload.clos:
+            clo = CLO(
+                course_id=course.id,
+                code=clo_item.code,
+                description=clo_item.description,
+                domain=clo_item.domain,
+                created_by=current_user.id,
+            )
+            db.add(clo)
+            db.flush()  # ต้องมี clo.id ก่อนสร้างแถว clo_plo_mapping ที่อ้างถึง
+            clo_id_by_code[clo_item.code] = clo.id
+
+        for mapping in payload.clo_plo_mapping:
+            db.add(
+                CLOPLOMapping(
+                    clo_id=clo_id_by_code[mapping.clo_code],
+                    plo_id=plo_id_by_code[mapping.plo_code],
+                )
+            )
+
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="บันทึกไม่สำเร็จ (อาจมีรหัส CLO ซ้ำกันภายในวิชานี้ หรือข้อมูลขัดแย้งอื่นที่ไม่ได้เช็คไว้ล่วงหน้า)",
+        ) from exc
+
+    db.refresh(course)
+    clos = db.query(CLO).filter(CLO.course_id == course.id).order_by(CLO.id).all()
+
+    return CourseImportSaveResponse(
+        course=CourseSchema.model_validate(course),
+        clos=[CLOSchema.model_validate(c) for c in clos],
+    )

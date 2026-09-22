@@ -1,20 +1,30 @@
-"""Pydantic schemas สำหรับฟีเจอร์ "นำเข้าข้อมูลวิชาจาก มคอ.3 ด้วย AI" (Phase 1: แกะข้อมูลอย่างเดียว
-ไม่เขียนอะไรลง DB)
+"""Pydantic schemas สำหรับฟีเจอร์ "นำเข้าข้อมูลวิชาจาก มคอ.3 ด้วย AI"
+
+Phase 1 (แกะข้อมูลอย่างเดียว ไม่เขียนอะไรลง DB): CourseImportFromMCO3Response
+Phase 2 (บันทึกจริงจากผลลัพธ์ที่แอดมินตรวจ/แก้ไขแล้วใน Phase 3): CourseImportSaveRequest/Response
 
 เชื่อมกับ : CourseImportFromMCO3Response ตัวเดียวกันนี้ถูกส่งให้ Gemini เป็น response_schema
             (structured output) ใน app/services/mco3_import_service.py และใช้เป็น response_model
             ของ POST /courses/import-from-mco3 ด้วย - เป็น single source of truth เดียวระหว่าง
             "รูปแบบที่บอกโมเดลให้ตอบ" กับ "contract ที่ frontend ได้รับกลับจริง" กันไม่ให้สอง
-            ฝั่ง drift ไม่ตรงกัน
+            ฝั่ง drift ไม่ตรงกัน - CourseImportSaveRequest ใช้ MCO3CLOItem/MCO3CLOPLOMappingItem
+            ร่วมกับ Phase 1 (โครงเดียวกันเป๊ะ) แต่ไม่มี category_raw/instructor_name/
+            semester_display/flags เพราะ field พวกนี้เป็นข้อมูลสำหรับ "หน้าตรวจสอบ" เท่านั้น ไม่มีที่
+            เก็บถาวร (ดู app/routes/course_import.py POST /courses/import-from-mco3/save)
 
-ถ้าแก้ : เพิ่ม field ใหม่ต้องคิดด้วยว่า Gemini จะรู้ได้ยังไงว่าต้องกรอกอะไร (ดู system instruction ใน
-         mco3_import_service.py ที่อธิบาย field พวกนี้เป็นภาษาไทยให้โมเดลอ่าน)
+ถ้าแก้ : เพิ่ม field ใหม่ใน CourseImportFromMCO3Response ต้องคิดด้วยว่า Gemini จะรู้ได้ยังไงว่าต้อง
+         กรอกอะไร (ดู system instruction ใน mco3_import_service.py ที่อธิบาย field พวกนี้เป็นภาษาไทย
+         ให้โมเดลอ่าน) - เพิ่ม field ใหม่ใน CourseImportSaveRequest ต้องเช็คด้วยว่า Course/CLO model
+         มีคอลัมน์รองรับจริง (ดู app/models/course.py, app/models/clo.py)
 """
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.clo import CLOSchema
+from app.schemas.course import CourseSchema
 
 
 MCO3CLODomain = Literal["knowledge", "skills", "ethics", "character"]
@@ -64,3 +74,28 @@ class CourseImportFromMCO3Response(BaseModel):
     instructor_name: str | None = None
     semester_display: str | None = None
     flags: list[MCO3ImportFlag] = Field(default_factory=list)
+
+
+class CourseImportSaveRequest(BaseModel):
+    """ร่างคำขอบันทึกจริงของ Phase 2 - รับข้อมูลที่แอดมินตรวจ/แก้ไขแล้วในหน้า Phase 3 (ไม่ใช่ไฟล์ดิบ
+    อีกต่อไป ไม่เรียก Gemini ซ้ำ) category เป็นค่าสุดท้ายที่แอดมินตัดสินใจแล้ว (ไม่มี category_raw/
+    category_mapped แยกกันเหมือน Phase 1 เพราะนั่นเป็นข้อมูลช่วยตัดสินใจตอนตรวจ ไม่ใช่ข้อมูลที่ต้องเก็บ)
+    ไม่มี instructor_name/semester_display/flags เพราะไม่มีที่เก็บถาวรและไม่ต้องเก็บเป็น audit trail
+    (ตามที่ผู้ใช้ยืนยัน 2026-09-22) - curriculum_mismatch ที่แอดมินเห็น warning แล้วยังกดบันทึกต่อ ก็
+    ไม่ถูกเช็คซ้ำที่นี่เช่นกัน (แอดมินตัดสินใจแล้วตอนตรวจ ไม่ block)"""
+
+    curriculum_id: int
+    course_code: str
+    name_th: str
+    name_en: str | None = None
+    credit: int
+    category: str | None = None
+    clos: list[MCO3CLOItem] = Field(default_factory=list)
+    clo_plo_mapping: list[MCO3CLOPLOMappingItem] = Field(default_factory=list)
+
+
+class CourseImportSaveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    course: CourseSchema
+    clos: list[CLOSchema]
