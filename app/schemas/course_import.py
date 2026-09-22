@@ -17,9 +17,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+MCO3CLODomain = Literal["knowledge", "skills", "ethics", "character"]
+
+
 class MCO3CLOItem(BaseModel):
     code: str
     description: str
+    # โดเมนการเรียนรู้ของ CLO ข้อนี้ (มักกำกับด้วย (K)/(S)/(A)/(C) ในเอกสาร) - null ถ้าเอกสารไม่ได้
+    # ระบุไว้ชัดเจนพอจะแม็ปเข้า 4 ค่านี้ได้ตรงๆ (ห้ามเดา เหมือนกฎ checkbox_ambiguous) เก็บคู่กับ
+    # clo.domain ที่เพิ่มไว้แล้วใน migrate_add_clo_domain.py
+    domain: MCO3CLODomain | None = None
 
 
 class MCO3CLOPLOMappingItem(BaseModel):
@@ -50,4 +57,8 @@ class CourseImportFromMCO3Response(BaseModel):
     category_mapped: str | None = None
     clos: list[MCO3CLOItem] = Field(default_factory=list)
     clo_plo_mapping: list[MCO3CLOPLOMappingItem] = Field(default_factory=list)
+    # แสดงอ้างอิงในหน้าตรวจสอบเท่านั้น - Phase 2 (endpoint บันทึกจริง) ต้องไม่รับ/ไม่ใช้ 2 ฟิลด์นี้
+    # เลย เพราะไม่มีที่เก็บใน course (ข้อมูลนี้เป็นของ course_offering/study_plan คนละ layer)
+    instructor_name: str | None = None
+    semester_display: str | None = None
     flags: list[MCO3ImportFlag] = Field(default_factory=list)
