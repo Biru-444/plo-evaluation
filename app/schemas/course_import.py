@@ -39,6 +39,8 @@ MCO3FlagType = Literal[
     "checkbox_ambiguous",
     "duplicate_course_code",
     "curriculum_mismatch",
+    "title_content_mismatch",
+    "plo_mapping_not_filled",
     "other",
 ]
 
