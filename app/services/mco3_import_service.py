@@ -8,12 +8,18 @@
             bytes (Part.from_bytes) พร้อม response_schema=CourseImportFromMCO3Response บังคับให้
             Gemini ตอบเป็น JSON ตรงตาม schema เป๊ะ ไม่ต้อง parse free text เอง
 
-ถ้าแก้ : กฎการ flag ทั้ง 6 แบบ (category_mismatch/checkbox_ambiguous/duplicate_course_code/
-         curriculum_mismatch/title_content_mismatch/plo_mapping_not_filled) อยู่ใน
-         SYSTEM_INSTRUCTION ด้านล่างล้วนๆ ห้ามให้โมเดลเดาเอง — ถ้าจะ
-         เปลี่ยนตัวเลือกหมวดหมู่วิชา (ตอนนี้คือ "วิชาแกน"/"วิชาบังคับ"/อื่นๆ) ต้องแก้ให้ตรงกับ
-         FIXED_CATEGORY_OPTIONS ใน plo-frontend/src/pages/CurriculumCourses.jsx ด้วย ไม่งั้น flag
-         category_mismatch จะขึ้นผิดพลาดทั้งที่ค่าจริงตรงกัน
+ถ้าแก้ : กฎการ flag 6 แบบที่ Gemini ตัดสินเอง (category_mismatch/checkbox_ambiguous/
+         duplicate_course_code/curriculum_mismatch/title_content_mismatch/plo_mapping_not_filled)
+         อยู่ใน SYSTEM_INSTRUCTION ด้านล่างล้วนๆ ห้ามให้โมเดลเดาเอง — ถ้าจะเปลี่ยนตัวเลือกหมวดหมู่วิชา
+         (ตอนนี้คือ "วิชาแกน"/"วิชาบังคับ"/อื่นๆ) ต้องแก้ให้ตรงกับ FIXED_CATEGORY_OPTIONS ใน
+         plo-frontend/src/pages/CurriculumCourses.jsx ด้วย ไม่งั้น flag category_mismatch จะขึ้น
+         ผิดพลาดทั้งที่ค่าจริงตรงกัน
+
+         flag แบบที่ 7 "domain_category_mismatch" (Workstream 4) **ไม่ใช่หน้าที่ของ Gemini** - ระบบ
+         เติมให้เองทีหลังใน app/routes/course_import.py หลัง Gemini ตอบกลับมาแล้ว (เทียบ clo.domain
+         ที่แกะได้ กับ plo.category จริงจาก DB ผ่าน app/services/domain_category_check.py - pure
+         code-level ไม่พึ่งการตัดสินใจของ LLM) SYSTEM_INSTRUCTION ด้านล่างจึงบอก Gemini ห้ามใช้ flag
+         ประเภทนี้เองเด็ดขาด กันสับสน/ซ้ำซ้อนกับที่ backend เติมให้
 
 หมายเหตุเรื่อง thinking_level : สเปกเดิมขอให้ตั้ง thinking_level="minimal" แต่ SDK เวอร์ชันที่รองรับ
     field นี้ (google-genai >= ~1.3x ขึ้นไป) ต้องการ anyio>=4.8/httpx>=0.28.1/pydantic>=2.12.5 ซึ่ง
@@ -122,6 +128,11 @@ SYSTEM_INSTRUCTION = """\
       กัน แต่ต้องเลือก flag type ให้ตรงกับสาเหตุจริง เพราะวิธีแก้ต่างกัน (checkbox_ambiguous ให้แอดมิน
       ไปเปิดไฟล์ต้นฉบับเทียบ, plo_mapping_not_filled ต้องไปถามอาจารย์ผู้สอนให้กรอกข้อมูลเพิ่มก่อน)
     - "other": ปัญหาอื่นที่ไม่เข้า 6 ประเภทข้างต้น แต่คิดว่าแอดมินควรรู้ก่อนบันทึกข้อมูล
+
+**ห้ามใช้ flag type "domain_category_mismatch" เองเด็ดขาด แม้จะสังเกตเห็นว่า domain ของ CLO กับ
+ประเภทของ PLO ที่ดูเหมือนจะไม่ตรงกันก็ตาม** - flag ประเภทนี้ระบบเติมให้เองอัตโนมัติหลังจากคุณตอบกลับมา
+แล้ว (เทียบจากข้อมูลจริงใน PLO ของหลักสูตร ไม่ใช่สิ่งที่คุณเห็นจากเอกสาร) ถ้าคุณใส่ flag นี้เองจะกลาย
+เป็นข้อมูลซ้ำซ้อนหรือขัดแย้งกับที่ระบบคำนวณจริง
 
 หมายเหตุ : ไม่ต้องสนใจ/ไม่ต้องแกะข้อมูลแผนการสอนรายสัปดาห์ในเอกสาร ไม่อยู่ในขอบเขตงานนี้
 

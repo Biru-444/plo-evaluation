@@ -6,11 +6,14 @@
          เป็น Course + CLO + CLOPLOMapping (ไม่เรียก Gemini ซ้ำ ไม่แตะไฟล์ต้นฉบับอีกแล้ว)
 
 เชื่อมกับ : Phase 1 เรียก app.services.mco3_import_service ล้วนๆ ไม่มี logic เรียก Gemini/แกะไฟล์อยู่
-            ในไฟล์นี้เอง - Phase 2 ไม่เรียก service นั้นเลย เขียน object (Course/CLO/CLOPLOMapping)
-            ตรงๆ ในทรานแซกชันเดียว เลียนแบบแพทเทิร์นเดียวกับ create_clo ใน app/routes/clo.py (db.add
-            course -> db.flush() เอา id -> db.add CLO ทีละตัว -> db.flush() เอา id -> db.add
-            CLOPLOMapping -> db.commit() ครั้งเดียวตอนจบ) เพื่อให้ atomic จริง (พังตรงไหนก็ rollback
-            หมดทั้งก้อน ไม่ทิ้ง course ที่ไม่มี CLO ค้างไว้)
+            ในไฟล์นี้เอง - หลัง Gemini ตอบกลับมาแล้ว _add_domain_category_mismatch_flags() เติม flag
+            "domain_category_mismatch" ต่อท้าย flags ให้เอง (pure code-level เทียบ clo.domain กับ
+            plo.category จริงจาก DB ผ่าน app.services.domain_category_check - Gemini ไม่ตัดสินเรื่องนี้
+            เลย ดู Workstream 4 ใน แผนการแก้ไขครั้งใหญ่-PLO-CLO.md) - Phase 2 ไม่เรียก service นั้นเลย
+            เขียน object (Course/CLO/CLOPLOMapping) ตรงๆ ในทรานแซกชันเดียว เลียนแบบแพทเทิร์นเดียวกับ
+            create_clo ใน app/routes/clo.py (db.add course -> db.flush() เอา id -> db.add CLO ทีละตัว
+            -> db.flush() เอา id -> db.add CLOPLOMapping -> db.commit() ครั้งเดียวตอนจบ) เพื่อให้
+            atomic จริง (พังตรงไหนก็ rollback หมดทั้งก้อน ไม่ทิ้ง course ที่ไม่มี CLO ค้างไว้)
 
 ถ้าแก้ : สิทธิ์ทั้งสอง endpoint ตั้งใจให้ admin เท่านั้น (require_role("admin")) เพราะเป็นฟีเจอร์เตรียม
          นำเข้าข้อมูลหลักสูตร/วิชาระดับระบบ ไม่ใช่งานแก้ไขวิชาที่ตัวเองสอนแบบ create_clo ทั่วไป (course
@@ -44,7 +47,9 @@ from app.schemas.course_import import (
     CourseImportFromMCO3Response,
     CourseImportSaveRequest,
     CourseImportSaveResponse,
+    MCO3ImportFlag,
 )
+from app.services.domain_category_check import check_domain_category_mismatch
 from app.services.mco3_import_service import (
     import_course_from_mco3_docx,
     import_course_from_mco3_pdf,
@@ -53,6 +58,31 @@ from app.services.mco3_import_service import (
 router = APIRouter(prefix="/courses", tags=["Course Import (มคอ.3 AI)"])
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx"}
+
+
+# เติม flag "domain_category_mismatch" เข้าไปใน response ของ Phase 1 ทีหลัง - pure code-level เทียบ
+# clo.domain ที่ Gemini แกะได้ กับ plo.category จริงของหลักสูตรนี้ (ดึงจาก DB ตรงๆ ไม่ใช่ให้ Gemini เดา)
+# ไม่แก้ clos/clo_plo_mapping เลย แค่ต่อท้าย flags (Workstream 4)
+def _add_domain_category_mismatch_flags(
+    db: Session, curriculum_id: int, result: CourseImportFromMCO3Response
+) -> CourseImportFromMCO3Response:
+    plo_category_by_code: dict[str, str] = dict(
+        db.query(PLO.code, PLO.category).filter(PLO.curriculum_id == curriculum_id).all()
+    )
+    clo_domain_by_code = {clo.code: clo.domain for clo in result.clos}
+
+    for mapping in result.clo_plo_mapping:
+        clo_domain = clo_domain_by_code.get(mapping.clo_code)
+        plo_category = plo_category_by_code.get(mapping.plo_code)
+        message = check_domain_category_mismatch(clo_domain, plo_category)
+        if message:
+            result.flags.append(
+                MCO3ImportFlag(
+                    type="domain_category_mismatch",
+                    message=f"{mapping.clo_code} → {mapping.plo_code}: {message}",
+                )
+            )
+    return result
 
 
 @router.post("/import-from-mco3", response_model=CourseImportFromMCO3Response)
@@ -80,10 +110,13 @@ async def import_course_from_mco3(
 
     try:
         if extension == ".pdf":
-            return import_course_from_mco3_pdf(content_bytes, curriculum.name)
-        return import_course_from_mco3_docx(content_bytes, curriculum.name)
+            result = import_course_from_mco3_pdf(content_bytes, curriculum.name)
+        else:
+            result = import_course_from_mco3_docx(content_bytes, curriculum.name)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return _add_domain_category_mismatch_flags(db, curriculum_id, result)
 
 
 @router.post("/import-from-mco3/save", response_model=CourseImportSaveResponse, status_code=201)

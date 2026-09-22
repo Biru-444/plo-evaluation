@@ -1,25 +1,32 @@
 """
 ทำอะไร : CRUD (list/create/delete — ไม่มี update เพราะเป็น pure join table ไม่มี field ให้แก้) สำหรับ
          ตาราง clo_plo_mapping — ผูก/ถอด CLO กับ PLO โดยตรงเป็นรายข้อ (many-to-many) ตาม มคอ.3 ของ
-         แต่ละวิชา ใช้เป็นหลักฐานคำนวณบรรลุ PLO ใน plo_calculation.py แทน course_plo
+         แต่ละวิชา ใช้เป็นหลักฐานคำนวณบรรลุ PLO ใน plo_calculation.py แทน course_plo - เพิ่ม
+         GET /domain-check ให้แอดมินเช็คว่า CLO/PLO ที่กำลังจะผูกกัน domain/category ตรงกันไหม
+         real-time ก่อนกดผูกจริง (Workstream 4 - ดู แผนการแก้ไขครั้งใหญ่-PLO-CLO.md)
 
 เชื่อมกับ : สิทธิ์เช็คผ่าน CLO.course_id -> CourseOffering.instructor_id แบบเดียวกับ create_clo/
             update_clo/delete_clo ใน app/routes/clo.py (admin แก้ได้ทุกวิชา, อาจารย์แก้ได้เฉพาะวิชาที่
             ตัวเองสอนอยู่จริงเท่านั้น) — ผูก/ถอด mapping คือการแก้ไข CLO ของวิชานั้นทางอ้อม จึงใช้เกณฑ์
-            เดียวกัน
+            เดียวกัน - /domain-check ใช้แค่ get_current_user เฉยๆ (ไม่เช็ค ownership) เพราะเป็นแค่การ
+            อ่าน/เทียบข้อมูล ไม่ได้แก้อะไร เรียก check_domain_category_mismatch จาก
+            app/services/domain_category_check.py ตัวเดียวกับที่ app/routes/course_import.py เรียกใช้
+            ตอนแกะ มคอ.3 (ไม่เขียนตรรกะเทียบซ้ำสองชุด)
 
 ถ้าแก้ : ต้อง include_router ในนี้ที่ app/main.py ด้วย ไม่งั้นเรียกไม่ได้เลย (404)
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CLO, CLOPLOMapping, CourseOffering, User
+from app.models import CLO, CLOPLOMapping, CourseOffering, PLO, User
 from app.schemas import CLOPLOMappingCreateSchema, CLOPLOMappingSchema
+from app.schemas.clo_plo_mapping import DomainCategoryCheckResponse
+from app.services.domain_category_check import check_domain_category_mismatch
 
 router = APIRouter(prefix="/clo-plo-mapping", tags=["CLO-PLO Mapping"])
 
@@ -58,6 +65,26 @@ def list_clo_plo_mappings(
     if plo_id is not None:
         query = query.filter(CLOPLOMapping.plo_id == plo_id)
     return query.order_by(CLOPLOMapping.id).all()
+
+
+# เช็ค clo.domain vs plo.category ล้วนๆ (pure code-level, ไม่พึ่ง Gemini) - แอดมินเรียกตอนเลือกครบทั้ง
+# CLO และ PLO ในฟอร์มผูก mapping ด้วยมือ (real-time, ก่อนกดผูกจริง) ไม่บล็อกอะไร แค่คืนข้อความเตือน
+@router.get("/domain-check", response_model=DomainCategoryCheckResponse)
+def check_clo_plo_domain_match(
+    clo_id: int = Query(...),
+    plo_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    clo = db.get(CLO, clo_id)
+    if clo is None:
+        raise HTTPException(status_code=404, detail="CLO not found")
+    plo = db.get(PLO, plo_id)
+    if plo is None:
+        raise HTTPException(status_code=404, detail="PLO not found")
+
+    message = check_domain_category_mismatch(clo.domain, plo.category)
+    return DomainCategoryCheckResponse(mismatch=message is not None, message=message)
 
 
 # ผูก CLO กับ PLO ใหม่ — instructor ทำได้เฉพาะ CLO ของวิชาที่ตัวเองสอนอยู่ (เช็คสิทธิ์ด้านล่าง) 409 ถ้า

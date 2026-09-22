@@ -51,6 +51,7 @@ MCO3FlagType = Literal[
     "curriculum_mismatch",
     "title_content_mismatch",
     "plo_mapping_not_filled",
+    "domain_category_mismatch",
     "other",
 ]
 
