@@ -1,11 +1,11 @@
 """Pydantic schemas สำหรับ GET /clo-achievement (ผล CLO ทั้งห้องของ 1 course_offering)
 
 ย้ายมาจาก app/routes/clo_calculation.py เดิม (อยู่ในไฟล์ route ตรงๆ) แยกออกมาที่นี่เพราะตอนนี้มีมากกว่า
-1 ที่ใช้ (route เดิม + app/services/mco5_export_service.py) - ต้องมี module กลางให้ทั้งสองฝั่ง import
-ร่วมกันแทนที่จะ import ข้าม route/service กันเอง
+1 ที่ใช้ (route เดิม + app/services/clo_report_export_service.py) - ต้องมี module กลางให้ทั้งสองฝั่ง
+import ร่วมกันแทนที่จะ import ข้าม route/service กันเอง
 
 เชื่อมกับ : สร้างโดย app/services/clo_achievement_service.py::compute_offering_clo_achievement -
-            ทั้ง GET /clo-achievement (response_model ตรงๆ) และ GET /clo-achievement/export/mco5
+            ทั้ง GET /clo-achievement (response_model ตรงๆ) และ GET /clo-achievement/export
             (ใช้ตัวเลขไปสร้างไฟล์ Excel) เรียกฟังก์ชันเดียวกันนั้น ไม่มีสูตรคำนวณซ้ำสองชุด
 
 ถ้าแก้ : ฟิลด์ในนี้เป็น "สัญญา" ของ GET /clo-achievement ที่ frontend (CLOAchievementPanel.jsx) พึ่งพา

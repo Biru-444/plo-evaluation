@@ -70,10 +70,9 @@ app.add_middleware(
     # Content-Disposition ไม่ถูก expose ให้ JS ฝั่ง browser อ่านได้โดย default ข้าม origin (CORS spec -
     # allow_headers ควบคุมแค่ request header ที่ browser ส่งได้ ไม่ใช่ response header ที่ JS อ่านได้)
     # ต้องเปิดชื่อ header ที่ frontend ต้องอ่านเองตรงๆ ผ่าน expose_headers - จำเป็นเพราะ
-    # exportOfferingMco5Excel() (api/client.js) ดึงชื่อไฟล์จาก header นี้มาตั้งชื่อตอนดาวน์โหลด (ดู
-    # TASK-export-mco5.md) ไม่งั้นจะได้ response.headers['content-disposition'] เป็น undefined เงียบๆ
-    # ทั้งที่ backend ส่งมาถูกต้องแล้ว (เคยเจอจริงตอนทดสอบ - ไฟล์ดาวน์โหลดได้แต่ชื่อไฟล์ผิดเป็นชื่อ
-    # fallback เสมอ)
+    # exportOfferingCLOReport() (api/client.js) ดึงชื่อไฟล์จาก header นี้มาตั้งชื่อตอนดาวน์โหลด ไม่งั้น
+    # จะได้ response.headers['content-disposition'] เป็น undefined เงียบๆ ทั้งที่ backend ส่งมาถูกต้อง
+    # แล้ว (เคยเจอจริงตอนทดสอบ - ไฟล์ดาวน์โหลดได้แต่ชื่อไฟล์ผิดเป็นชื่อ fallback เสมอ)
     expose_headers=["Content-Disposition"],
 )
 

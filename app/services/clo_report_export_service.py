@@ -1,18 +1,18 @@
 """
-ทำอะไร : สร้างไฟล์ Excel ประกอบการกรอก มคอ.5 (รายงานผลการดำเนินการของรายวิชา ตามแบบฟอร์ม OBE5 BRU) ของ
-         course_offering เดียว - ระดับ CLO เท่านั้น (ไม่คำนวณ PLO - อยู่รายงานอีกตัว ดู
-         TASK-export-mco5.md) 5 ชีต: ข้อมูลรายวิชา, ผลการบรรลุ CLO, สรุปผลการเรียน (กระจายเกรด),
+ทำอะไร : สร้างไฟล์ Excel รายงานผลบรรลุ CLO ของ course_offering เดียว - ระดับ CLO เท่านั้น (ไม่คำนวณ PLO
+         - อยู่รายงานอีกตัว) ไม่ยึดตามแบบฟอร์มราชการใดๆ (เคยมีเวอร์ชันตามแบบฟอร์ม มคอ.5/OBE5 BRU รวมถึง
+         export เป็น Word มาก่อน แต่ยกเลิกไปแล้ว - เป้าหมายตอนนี้คือรายงานที่อ่านเข้าใจได้เอง ครบถ้วน นำ
+         กลับไปใช้ซ้ำได้) 6 ชีต: คำอธิบาย, ข้อมูลรายวิชา, ผลการบรรลุ CLO, สรุปผลการเรียน (กระจายเกรด),
          การยืนยันผลสัมฤทธิ์ (ต่อชิ้นงาน), รายบุคคล (เฉพาะ admin/อาจารย์เจ้าของวิชา - ข้อมูล PDPA)
 
 เชื่อมกับ : ไฟล์นี้เป็นแค่ชั้น "วาดลง openpyxl" ล้วนๆ - ข้อมูล/ตรรกะจัดรูปแบบทั้งหมด (คำนวณ CLO, กระจาย
-            เกรด, สรุปผลชิ้นงาน) อยู่ใน app/services/mco5_data_service.py ที่ Word export
-            (mco5_docx_export_service.py) ใช้ร่วมกันเป๊ะ ไม่มีสูตร/query ซ้ำสองชุด (Phase 2 - ดู
-            TASK-export-mco5.md ข้อ 6) - build_mco5_excel() เรียกจาก
-            app/routes/clo_calculation.py::export_mco5_excel
+            เกรด, สรุปผลชิ้นงาน, ข้อความอธิบาย) อยู่ใน app/services/clo_report_data_service.py -
+            build_clo_report_excel() เรียกจาก
+            app/routes/clo_calculation.py::export_clo_report_excel
 
-ถ้าแก้ : ฟอนต์ต้องเป็น "TH Sarabun New" เสมอ (ไฟล์นี้จะถูกคัดลอกไปใส่แบบฟอร์มราชการจริง) - เพิ่ม/แก้ไข
-         ชีตต้องอัปเดต TASK-export-mco5.md ให้ตรงด้วย (เอกสารนี้เป็นสเปกอ้างอิงของฟีเจอร์) - ข้อมูลที่ต้อง
-         โชว์ทั้ง Excel และ Word ให้แก้ที่ mco5_data_service.py ไม่ใช่ที่นี่
+ถ้าแก้ : ฟอนต์ต้องเป็น "TH Sarabun New" เสมอ - ข้อมูลที่ต้องโชว์ในรายงานให้แก้ที่
+         clo_report_data_service.py ไม่ใช่ที่นี่ (ไฟล์นี้แค่วาดผล ไม่ควรมีตรรกะคำนวณ/จัดรูปแบบข้อความ
+         ของตัวเอง)
 """
 from __future__ import annotations
 
@@ -30,11 +30,12 @@ from app.services.clo_achievement_service import (
     CLOAchievementResult,
     compute_offering_clo_achievement_raw,
 )
-from app.services.mco5_data_service import (
+from app.services.clo_report_data_service import (
     CLORow,
     compute_assessment_confirmation_rows,
     compute_clo_rows,
     compute_course_info_rows,
+    compute_explanation_rows,
     compute_grade_distribution,
 )
 
@@ -57,19 +58,33 @@ def _autofit_columns(ws: Worksheet, widths: list[int]) -> None:
         ws.column_dimensions[get_column_letter(i)].width = width
 
 
-def _build_sheet1_course_info(
+def _build_sheet_explanation(wb: Workbook, target_rate: Decimal) -> None:
+    """ชีตแรกสุด - อธิบายสูตร/นิยามให้ไฟล์นี้อ่านเข้าใจได้เองโดยไม่ต้องถามใคร"""
+    ws = wb.active
+    ws.title = "คำอธิบาย"
+    ws.cell(row=1, column=1, value="คำอธิบายรายงานฉบับนี้").font = TITLE_FONT
+    for i, row in enumerate(compute_explanation_rows(target_rate), start=3):
+        label_cell = ws.cell(row=i, column=1, value=row.label)
+        label_cell.font = BOLD_FONT
+        label_cell.alignment = WRAP_ALIGNMENT
+        value_cell = ws.cell(row=i, column=2, value=row.value)
+        value_cell.font = BASE_FONT
+        value_cell.alignment = WRAP_ALIGNMENT
+    _autofit_columns(ws, [28, 70])
+
+
+def _build_sheet_course_info(
     wb: Workbook, db: Session, offering: CourseOffering, target_rate: Decimal
 ) -> None:
-    ws = wb.active
-    ws.title = "ข้อมูลรายวิชา"
-    ws.cell(row=1, column=1, value="ข้อมูลรายวิชา (มคอ.5 หมวด 1)").font = TITLE_FONT
+    ws = wb.create_sheet("ข้อมูลรายวิชา")
+    ws.cell(row=1, column=1, value="ข้อมูลรายวิชา").font = TITLE_FONT
     for i, row in enumerate(compute_course_info_rows(db, offering, target_rate), start=3):
         ws.cell(row=i, column=1, value=row.label).font = BOLD_FONT
         ws.cell(row=i, column=2, value=row.value).font = BASE_FONT
     _autofit_columns(ws, [28, 50])
 
 
-def _build_sheet2_clo_achievement(wb: Workbook, clo_rows: list[CLORow]) -> None:
+def _build_sheet_clo_achievement(wb: Workbook, clo_rows: list[CLORow]) -> None:
     ws = wb.create_sheet("ผลการบรรลุ CLO")
     headers = [
         "CLO",
@@ -117,11 +132,11 @@ def _build_sheet2_clo_achievement(wb: Workbook, clo_rows: list[CLORow]) -> None:
     _autofit_columns(ws, [10, 30, 14, 32, 12, 12, 8, 8, 10, 10, 10, 40, 30])
 
 
-def _build_sheet3_grade_distribution(wb: Workbook, db: Session, offering: CourseOffering) -> None:
+def _build_sheet_grade_distribution(wb: Workbook, db: Session, offering: CourseOffering) -> None:
     ws = wb.create_sheet("สรุปผลการเรียน")
     dist = compute_grade_distribution(db, offering)
 
-    ws.cell(row=1, column=1, value="สรุปผลการเรียน (มคอ.5 หมวด 3 ข้อ 1-4)").font = TITLE_FONT
+    ws.cell(row=1, column=1, value="สรุปผลการเรียน").font = TITLE_FONT
     ws.cell(row=3, column=1, value="จำนวนนักศึกษาที่ลงทะเบียน").font = BOLD_FONT
     ws.cell(row=3, column=2, value=dist.total_registered).font = BASE_FONT
     ws.cell(row=4, column=1, value="จำนวนที่ถอน (W)").font = BOLD_FONT
@@ -160,7 +175,7 @@ def _build_sheet3_grade_distribution(wb: Workbook, db: Session, offering: Course
     _autofit_columns(ws, [16, 24, 12, 12])
 
 
-def _build_sheet4_assessment_confirmation(
+def _build_sheet_assessment_confirmation(
     wb: Workbook, db: Session, offering: CourseOffering, status_by_clo_id: dict[int, str]
 ) -> None:
     ws = wb.create_sheet("การยืนยันผลสัมฤทธิ์")
@@ -188,7 +203,7 @@ def _build_sheet4_assessment_confirmation(
     _autofit_columns(ws, [30, 20, 12, 14, 16, 45])
 
 
-def _build_sheet5_individual(
+def _build_sheet_individual(
     wb: Workbook, db: Session, offering: CourseOffering, raw_results: list[CLOAchievementResult]
 ) -> None:
     ws = wb.create_sheet("รายบุคคล")
@@ -241,23 +256,25 @@ def _build_sheet5_individual(
     _autofit_columns(ws, [16, 26, 8] + [10] * len(raw_results))
 
 
-def build_mco5_excel(
+def build_clo_report_excel(
     db: Session, offering: CourseOffering, target_rate: Decimal, include_personal_sheet: bool
 ) -> BytesIO:
-    """ทำอะไร : สร้าง workbook ครบ 5 ชีต (หรือ 4 ถ้า include_personal_sheet=False) แล้วคืนเป็น BytesIO
+    """ทำอะไร : สร้าง workbook ครบ 6 ชีต (หรือ 5 ถ้า include_personal_sheet=False) แล้วคืนเป็น BytesIO
     พร้อมส่งเป็น StreamingResponse - เรียก compute_offering_clo_achievement_raw() ครั้งเดียว แล้วส่งต่อ
-    ให้ mco5_data_service.py จัดรูปแบบ ใช้ผลลัพธ์ร่วมกันทั้งชีต 2, 4, 5"""
+    ให้ clo_report_data_service.py จัดรูปแบบ ใช้ผลลัพธ์ร่วมกันทั้งชีตผลบรรลุ CLO/การยืนยันผลสัมฤทธิ์/
+    รายบุคคล"""
     raw_results = compute_offering_clo_achievement_raw(db, offering)
     clo_rows = compute_clo_rows(raw_results, target_rate)
     status_by_clo_id = {row.clo_id: row.status for row in clo_rows}
 
     wb = Workbook()
-    _build_sheet1_course_info(wb, db, offering, target_rate)
-    _build_sheet2_clo_achievement(wb, clo_rows)
-    _build_sheet3_grade_distribution(wb, db, offering)
-    _build_sheet4_assessment_confirmation(wb, db, offering, status_by_clo_id)
+    _build_sheet_explanation(wb, target_rate)
+    _build_sheet_course_info(wb, db, offering, target_rate)
+    _build_sheet_clo_achievement(wb, clo_rows)
+    _build_sheet_grade_distribution(wb, db, offering)
+    _build_sheet_assessment_confirmation(wb, db, offering, status_by_clo_id)
     if include_personal_sheet:
-        _build_sheet5_individual(wb, db, offering, raw_results)
+        _build_sheet_individual(wb, db, offering, raw_results)
 
     buffer = BytesIO()
     wb.save(buffer)

@@ -1,25 +1,25 @@
 """
-ทำอะไร : เตรียม "ข้อมูลพร้อมแสดงผล" สำหรับ export มคอ.5 ทั้งสอง format (Excel - mco5_export_service.py,
-         Word - mco5_docx_export_service.py) - ชั้นกลางที่ทำให้สอง format ใช้ข้อมูล/ตรรกะจัดรูปแบบชุด
-         เดียวกันเป๊ะ ไม่คำนวณซ้ำคนละสูตรหรือคนละ query (Phase 2 - ดู TASK-export-mco5.md ข้อ 6: "reuse
-         the sheet-building data ... do not recompute anything separately for the docx")
+ทำอะไร : เตรียม "ข้อมูลพร้อมแสดงผล" สำหรับ export รายงานผลบรรลุ CLO เป็น Excel ของ offering เดียว
+         (clo_report_export_service.py) - ไม่ยึดตามแบบฟอร์มราชการใดๆ (เคยมีเวอร์ชันตามแบบฟอร์ม
+         มคอ.5/OBE5 BRU รวมถึง export เป็น Word มาก่อน แต่ยกเลิกไปแล้ว - เป้าหมายตอนนี้คือรายงานที่อ่าน
+         เข้าใจได้เอง ครบถ้วน นำกลับไปใช้ซ้ำได้ ไม่ผูกกับแบบฟอร์มภายนอก)
 
-เชื่อมกับ : ทุกฟังก์ชัน compute_*() ที่นี่ไม่แตะ openpyxl/python-docx เลย คืนแค่ dataclass ธรรมดา (ค่าดิบ
-            ที่จัดรูปแบบไปแล้วเท่าที่เป็น "กฎธุรกิจ" ร่วมกัน เช่น ร้อยละที่เป็น 0 ต้องแสดง "-" - ส่วนที่
-            เป็นเรื่องเฉพาะของแต่ละ format เช่น cell เป็นตัวเลขจริงหรือ paragraph text ปล่อยให้ builder
-            ของแต่ละ format ตัดสินใจเอง) resolve_mco5_export_access() (เช็คสิทธิ์) ก็อยู่ที่นี่เพราะทั้ง
-            สอง endpoint (export/mco5, export/mco5-docx) ใช้ตรรกะเดียวกันเป๊ะ
+เชื่อมกับ : ทุกฟังก์ชัน compute_*() ที่นี่ไม่แตะ openpyxl เลย คืนแค่ dataclass ธรรมดา (ค่าดิบที่จัด
+            รูปแบบไปแล้วเท่าที่เป็น "กฎธุรกิจ" ร่วมกัน เช่น ร้อยละที่เป็น 0 ต้องแสดง "-" - ส่วนที่เป็น
+            เรื่องเฉพาะของการวาดลง cell เช่น เป็นตัวเลขจริงหรือ string ปล่อยให้
+            clo_report_export_service.py ตัดสินใจเอง) resolve_clo_report_export_access() (เช็คสิทธิ์)
+            ก็อยู่ที่นี่
 
             ตัวสูตรคำนวณ CLO mastery จริงยังอยู่ที่ clo_achievement_service.py เหมือนเดิม (ไม่แตะ) -
             ที่นี่แค่เรียก compute_offering_clo_achievement_raw() แล้วต่อยอดจัดรูปแบบสำหรับ export
 
-ถ้าแก้ : ถ้าเพิ่ม field ใหม่ที่ต้องโชว์ทั้ง Excel และ Word ให้เพิ่มที่นี่แล้วให้ทั้งสอง builder ดึงไปใช้
-         ไม่ใช่เพิ่มแยกคนละที่ (จะทำให้สอง format ข้อมูลไม่ตรงกัน)
+ถ้าแก้ : ถ้าเพิ่ม field ใหม่ที่ต้องโชว์ในรายงาน ให้เพิ่มที่นี่แล้วให้ clo_report_export_service.py ดึงไปใช้
+         ไม่ใช่คำนวณแทรกตรงจุดวาด cell เอง (กันข้อมูล/ตรรกะกระจายหลายที่)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -32,7 +32,6 @@ from app.services.clo_achievement_service import (
 )
 from app.services.domain_category_check import DOMAIN_LABEL_TH
 
-# ลำดับ+ความหมายของระดับคะแนนตามแบบฟอร์ม มคอ.5 จริง
 GRADE_ORDER = ["A", "B+", "B", "C+", "C", "D+", "D", "F", "S", "U", "Au", "W", "I"]
 GRADE_MEANING = {
     "A": "ดีเยี่ยม",
@@ -51,13 +50,12 @@ GRADE_MEANING = {
 }
 
 
-def resolve_mco5_export_access(
+def resolve_clo_report_export_access(
     db: Session, offering_id: int, current_user: User
 ) -> tuple[CourseOffering, bool]:
     """
-    ทำอะไร : หา course_offering + เช็คสิทธิ์การ export มคอ.5 (ทั้ง Excel และ Word) ในฟังก์ชันเดียว คืน
-             (offering, include_personal_sheet) - include_personal_sheet=False ตัดข้อมูลรายบุคคลออก
-             (ชีต 5 ของ Excel - Word ไม่มีส่วนรายบุคคลอยู่แล้วตามสเปก ไม่ใช้ flag นี้)
+    ทำอะไร : หา course_offering + เช็คสิทธิ์การ export รายงานผลบรรลุ CLO ในฟังก์ชันเดียว คืน
+             (offering, include_personal_sheet) - include_personal_sheet=False ตัดชีตข้อมูลรายบุคคลออก
 
     เชื่อมกับ : ใช้ pattern เดียวกับ ownership check ใน app/routes/clo.py / clo_plo_mapping.py (admin
                 ผ่านเสมอ, อาจารย์ต้องเป็นเจ้าของ offering นี้เท่านั้น)
@@ -87,10 +85,14 @@ def _thai_date_str(d: date) -> str:
     return f"{d.day:02d}/{d.month:02d}/{d.year + 543}"
 
 
+def _thai_datetime_str(dt: datetime) -> str:
+    return f"{dt.day:02d}/{dt.month:02d}/{dt.year + 543} {dt.hour:02d}:{dt.minute:02d} น."
+
+
 def _resolve_year_level(db: Session, offering: CourseOffering) -> int | None:
     """ชั้นปีของวิชานี้จาก study_plan - แผนเฉพาะรุ่น (cohort_year ตรงกับ offering.cohort_year) ชนะแผน
     มาตรฐาน (cohort_year เป็น None) ถ้ามีทั้งคู่ (เหมือน pattern ที่ ylo_calculation.py ใช้) ไม่พบเลย =
-    None (export จะเว้นว่าง/แสดง "-" ตามสเปก)"""
+    None (export จะแสดง "-" แทน)"""
     query = db.query(StudyPlan).filter(StudyPlan.course_id == offering.course_id)
     if offering.cohort_year is not None:
         specific = query.filter(StudyPlan.cohort_year == offering.cohort_year).first()
@@ -104,6 +106,38 @@ def _resolve_year_level(db: Session, offering: CourseOffering) -> int | None:
 
 
 @dataclass
+class ExplanationRow:
+    label: str
+    value: str
+
+
+def compute_explanation_rows(target_rate: Decimal) -> list[ExplanationRow]:
+    """ชีตแรกสุดของรายงาน - อธิบายสูตร/นิยามให้พอเข้าใจไฟล์นี้ได้เองโดยไม่ต้องถามใคร (คะแนน % CLO
+    คำนวณยังไง, "ผ่าน"/"บรรลุ" หมายถึงอะไร, เกณฑ์ที่ใช้ในรอบ export นี้, เวลาที่ export) - ตัวเลข
+    target_rate ต้องมาจากคำขอ export จริง ไม่ hardcode ค่า default ซ้ำ"""
+    return [
+        ExplanationRow(
+            "สูตรคำนวณ % CLO ต่อคน",
+            "ค่าเฉลี่ยถ่วงน้ำหนักของคะแนนในชิ้นงานที่ผูกกับ CLO ข้อนั้น: "
+            "(คะแนนที่ได้ ÷ คะแนนเต็ม × 100 × น้ำหนักชิ้นงาน) รวมทุกชิ้นงาน แล้วหารด้วยผลรวมน้ำหนัก "
+            "- นับเฉพาะชิ้นงานที่มีคะแนนบันทึกไว้จริงเท่านั้น",
+        ),
+        ExplanationRow(
+            '"ผ่าน" (รายคน) หมายถึง',
+            "นักศึกษาคนนั้นได้ % CLO ข้อนั้น มากกว่าหรือเท่ากับเกณฑ์ผ่านรายคนของ CLO ข้อนั้นเอง "
+            "(ตั้งค่าแยกได้ต่อ CLO ไม่ใช่ค่าคงที่ทั้งระบบ)",
+        ),
+        ExplanationRow(
+            '"บรรลุ" (ระดับวิชา) หมายถึง',
+            "ร้อยละของนักศึกษาที่ผ่าน CLO ข้อนั้น (จากคนที่มีข้อมูลให้ตัดสิน) มากกว่าหรือเท่ากับเกณฑ์"
+            "ระดับรายวิชาที่เลือกไว้ตอน export นี้ (ดูแถวถัดไป)",
+        ),
+        ExplanationRow("เกณฑ์ระดับรายวิชาที่ใช้ในรายงานนี้", f"{target_rate}%"),
+        ExplanationRow("วันที่-เวลาที่ export", _thai_datetime_str(datetime.now())),
+    ]
+
+
+@dataclass
 class CourseInfoRow:
     label: str
     value: str
@@ -112,8 +146,7 @@ class CourseInfoRow:
 def compute_course_info_rows(
     db: Session, offering: CourseOffering, target_rate: Decimal
 ) -> list[CourseInfoRow]:
-    """หมวด 1 ของ มคอ.5 - 11 แถว (label, value) ตามลำดับที่สเปกกำหนด ใช้ร่วมกันทั้ง Excel (ตาราง 2
-    คอลัมน์) และ Word (หมวด 1)"""
+    """ข้อมูลพื้นฐานของวิชา/การเปิดสอนที่กำลัง export - ใช้แสดงเป็นตาราง 2 คอลัมน์ (หัวข้อ/ค่า)"""
     course = offering.course
     curriculum = course.curriculum
     instructor_name = (
@@ -170,7 +203,7 @@ class CLORow:
 def compute_clo_rows(
     raw_results: list[CLOAchievementResult], target_rate: Decimal
 ) -> list[CLORow]:
-    """หมวด 2 ข้อ 3 ของ มคอ.5 - หนึ่งแถวต่อ CLO ใช้ร่วมกันทั้งชีต 2 ของ Excel และตาราง CLO ของ Word"""
+    """ผลบรรลุของแต่ละ CLO - หนึ่งแถวต่อ CLO"""
     rows: list[CLORow] = []
     for result in raw_results:
         clo = result.clo
@@ -215,8 +248,8 @@ def compute_clo_rows(
 
 
 def _percent_display(count: int, total: int) -> str:
-    """ร้อยละที่เป็น 0 แสดง "-" เสมอตามแบบฟอร์มจริง (ไม่ใช่ "0.00") - total เป็น 0 ก็ "-" ด้วย (หารด้วย
-    ศูนย์ไม่ได้ และ count จะเป็น 0 อยู่แล้วในกรณีนี้)"""
+    """ร้อยละที่เป็น 0 แสดง "-" เสมอ (ไม่ใช่ "0.00") - total เป็น 0 ก็ "-" ด้วย (หารด้วยศูนย์ไม่ได้ และ
+    count จะเป็น 0 อยู่แล้วในกรณีนี้)"""
     if count == 0 or total == 0:
         return "-"
     return f"{(Decimal(count) / Decimal(total) * Decimal(100)).quantize(Decimal('0.01'))}"
@@ -243,7 +276,7 @@ class GradeDistribution:
 
 
 def compute_grade_distribution(db: Session, offering: CourseOffering) -> GradeDistribution:
-    """หมวด 3 ข้อ 1-4 ของ มคอ.5 - จำนวนลงทะเบียน/ถอน/คงอยู่ + ตารางกระจายเกรด"""
+    """จำนวนลงทะเบียน/ถอน/คงอยู่ + ตารางกระจายเกรด"""
     enrollments = db.query(Enrollment).filter(Enrollment.offering_id == offering.id).all()
     total_registered = len(enrollments)
     withdrawn = sum(1 for e in enrollments if e.final_grade == "W")
@@ -292,8 +325,8 @@ class AssessmentConfirmationRow:
 def compute_assessment_confirmation_rows(
     db: Session, offering: CourseOffering, status_by_clo_id: dict[int, str]
 ) -> list[AssessmentConfirmationRow]:
-    """หมวด 3 ข้อ 7 ของ มคอ.5 - หนึ่งแถวต่อ assessment_item ใช้ status_by_clo_id ที่ได้จาก
-    compute_clo_rows() (build {clo_id: status}) ไม่คำนวณสถานะ CLO ซ้ำเอง"""
+    """สรุปผลของแต่ละชิ้นงานประเมิน (assessment_item) - หนึ่งแถวต่อชิ้นงาน ใช้ status_by_clo_id ที่ได้
+    จาก compute_clo_rows() (build {clo_id: status}) ไม่คำนวณสถานะ CLO ซ้ำเอง"""
     items = db.query(AssessmentItem).filter(AssessmentItem.offering_id == offering.id).all()
     rows: list[AssessmentConfirmationRow] = []
 

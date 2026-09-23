@@ -3,23 +3,26 @@
          ของ 1 วิชา) — ต่างจาก plo_calculation.py ที่คำนวณระดับนักศึกษา/หลักสูตรทั้งก้อน ไฟล์นี้ตอบคำถาม
          "ทั้งห้องนี้ ใครผ่าน CLO ไหนบ้าง" และ "นักศึกษาคนนี้ วิชานี้ ได้คะแนนแต่ละ CLO เท่าไหร่ จาก
          ชิ้นงานอะไรบ้าง" — CLO เป็นของวิชา (course) ส่วนคะแนนจริงผูกกับ offering ที่นักศึกษาลงทะเบียน
-         รวมถึง export มคอ.5 (Excel) ของ offering เดียว - ใช้ตัวเลขชุดเดียวกับ GET /clo-achievement เป๊ะ
+         รวมถึง export รายงานผลบรรลุ CLO เป็น Excel ของ offering เดียว - ใช้ตัวเลขชุดเดียวกับ
+         GET /clo-achievement เป๊ะ
 
 สูตรคำนวณ : ค่าเฉลี่ยถ่วงน้ำหนักแบบเดียวกับ "ขั้นตอนที่ 1" ใน
   plo_calculation.py._clo_mastery_for_student คือ
   sum(score/total_score*100 * item_clo.weight_percent) / sum(item_clo.weight_percent)
   นับเฉพาะ assessment item ที่นักศึกษามีคะแนนบันทึกไว้จริงเท่านั้น - ตัวสูตรจริงอยู่ใน
-  app/services/clo_achievement_service.py แล้ว (refactor ออกมาให้ endpoint นี้กับ export มคอ.5 เรียกตัว
-  เดียวกัน ไม่มีสองชุด)
+  app/services/clo_achievement_service.py แล้ว (refactor ออกมาให้ endpoint นี้กับ export เรียกตัวเดียวกัน
+  ไม่มีสองชุด)
 
 เชื่อมกับ : - GET /clo-achievement (ไม่มี path ต่อท้าย) ใช้ในหน้าจัดการ offering (ดูผลสอบทั้งห้อง) เรียก
               compute_offering_clo_achievement() จาก clo_achievement_service.py ตรงๆ
             - GET /clo-achievement/student-course ใช้ในหน้าผลบรรลุรายบุคคล (student-plo) ตอนขยายดู
               รายวิชา (endpoint นี้ยังคำนวณเองในไฟล์นี้ ไม่ได้ผ่าน service - คนละ scope คือ 1 คน 1 วิชา
               ไม่ใช่ทั้งห้อง)
-            - GET /clo-achievement/export/mco5 ใช้ app/services/mco5_export_service.py สร้างไฟล์ Excel
-              ประกอบ มคอ.5 - เรียก compute_offering_clo_achievement_raw() (รุ่นละเอียด แยก "ไม่มีข้อมูล"
-              ออกจาก "ได้ 0%" ได้ตรงๆ) ไม่ใช่ compute_offering_clo_achievement() (รุ่น response เดิม)
+            - GET /clo-achievement/export ใช้ app/services/clo_report_export_service.py สร้างไฟล์ Excel
+              รายงานผลบรรลุ CLO - เรียก compute_offering_clo_achievement_raw() (รุ่นละเอียด แยก "ไม่มี
+              ข้อมูล" ออกจาก "ได้ 0%" ได้ตรงๆ) ไม่ใช่ compute_offering_clo_achievement() (รุ่น response
+              เดิม) - ไฟล์นี้ตั้งใจไม่ยึดตามแบบฟอร์มราชการใดๆ (เคยมีเวอร์ชันตามแบบฟอร์ม OBE5 BRU มาก่อน
+              แต่ยกเลิกไปแล้ว - เป้าหมายตอนนี้คือรายงานที่อ่านเข้าใจได้เอง ไม่ต้องอิงแบบฟอร์มภายนอก)
 
 ถ้าแก้ : สูตรใน clo_achievement_service.py ต้องตรงกับสูตรใน plo_calculation.py เสมอ (คำนวณ mastery
          เหมือนกันแต่คนละ scope) ถ้าแก้ไม่พร้อมกัน ตัวเลข mastery รายวิชาที่นี่กับที่ใช้ตัดสิน PLO จะไม่
@@ -49,9 +52,8 @@ from app.models import (
 )
 from app.schemas.clo_calculation import OfferingCLOAchievement
 from app.services.clo_achievement_service import compute_offering_clo_achievement
-from app.services.mco5_data_service import resolve_mco5_export_access
-from app.services.mco5_docx_export_service import build_mco5_docx
-from app.services.mco5_export_service import build_mco5_excel
+from app.services.clo_report_export_service import build_clo_report_excel
+from app.services.clo_report_data_service import resolve_clo_report_export_access
 
 router = APIRouter(prefix="/clo-achievement", tags=["CLO Achievement"])
 
@@ -110,28 +112,29 @@ def get_offering_clo_achievement(
     return compute_offering_clo_achievement(db, offering)
 
 
-@router.get("/export/mco5")
-def export_mco5_excel(
+@router.get("/export")
+def export_clo_report_excel(
     offering_id: int = Query(..., description="Course offering ID"),
     target_rate: float = Query(70.0, description="เกณฑ์ระดับรายวิชา (%) - CLO บรรลุเมื่อร้อยละที่ผ่าน >= ค่านี้"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    ทำอะไร : export ข้อมูลประกอบ มคอ.5 (รายงานผลรายวิชา) ของ offering เดียวเป็นไฟล์ Excel (5 ชีต) -
-             ตัวเลขทุกตัวคำนวณจากระบบ ไม่ให้อาจารย์คิดเลขเอง (ดู TASK-export-mco5.md)
+    ทำอะไร : export รายงานผลบรรลุ CLO ของ offering เดียวเป็นไฟล์ Excel - ตัวเลขทุกตัวคำนวณจากระบบ
+             ไม่ให้อาจารย์คิดเลขเอง ตั้งใจไม่ยึดตามแบบฟอร์มราชการใดๆ (เป้าหมายคือรายงานที่อ่านเข้าใจได้
+             เอง ครบถ้วน นำกลับไปใช้ซ้ำได้)
 
-    เชื่อมกับ : resolve_mco5_export_access() (mco5_data_service.py - ใช้ร่วมกับ export/mco5-docx ด้วย)
-                เช็คสิทธิ์ + หา offering ให้ในตัวเดียว (404/403 จากตรงนั้น) แล้ว build_mco5_excel() ใช้
+    เชื่อมกับ : resolve_clo_report_export_access() (clo_report_data_service.py) เช็คสิทธิ์ + หา offering
+                ให้ในตัวเดียว (404/403 จากตรงนั้น) แล้ว build_clo_report_excel() ใช้
                 compute_offering_clo_achievement_raw() คำนวณตัวเลข CLO ชุดเดียวกับ GET /clo-achievement
                 เป๊ะ (คนละฟังก์ชันแค่เพราะต้องการความละเอียดกว่า - ดู clo_achievement_service.py)
 
     ถ้าแก้ : สิทธิ์ (สำคัญ - ข้อมูลรายบุคคล/PDPA) : admin หรืออาจารย์เจ้าของ offering ได้ทุกชีต role
-             อื่นได้แค่ชีตสรุป (ไม่มีชีต 5 รายบุคคล) - ดู resolve_mco5_export_access()
+             อื่นได้แค่ชีตสรุป (ไม่มีชีตรายบุคคล) - ดู resolve_clo_report_export_access()
     """
-    offering, include_personal_sheet = resolve_mco5_export_access(db, offering_id, current_user)
+    offering, include_personal_sheet = resolve_clo_report_export_access(db, offering_id, current_user)
 
-    workbook_bytes = build_mco5_excel(
+    workbook_bytes = build_clo_report_excel(
         db,
         offering,
         target_rate=Decimal(str(target_rate)),
@@ -139,47 +142,12 @@ def export_mco5_excel(
     )
 
     filename = (
-        f"mco5_{offering.course.course_code}_{offering.academic_year}-{offering.semester}"
+        f"clo_report_{offering.course.course_code}_{offering.academic_year}-{offering.semester}"
         f"_sec{offering.section}.xlsx"
     )
     return StreamingResponse(
         workbook_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.get("/export/mco5-docx")
-def export_mco5_docx(
-    offering_id: int = Query(..., description="Course offering ID"),
-    target_rate: float = Query(70.0, description="เกณฑ์ระดับรายวิชา (%) - CLO บรรลุเมื่อร้อยละที่ผ่าน >= ค่านี้"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    ทำอะไร : export ข้อมูลประกอบ มคอ.5 เป็นไฟล์ Word (.docx) ตามโครงแบบฟอร์ม OBE5 BRU (Phase 2 - ดู
-             TASK-export-mco5.md ข้อ 6) - ไม่มีส่วนข้อมูลรายบุคคล (ต่างจาก Excel)
-
-    เชื่อมกับ : ใช้ resolve_mco5_export_access() ตัวเดียวกับ export/mco5 (สิทธิ์เหมือนกันเป๊ะ) แล้ว
-                build_mco5_docx() ใช้ mco5_data_service.py ชุดเดียวกับ Excel export ไม่คำนวณ/query ซ้ำ -
-                include_personal_sheet ที่ resolve_mco5_export_access() คืนมาไม่ได้ใช้ตรงนี้ (Word ไม่มี
-                ส่วนรายบุคคลอยู่แล้วไม่ว่า role ไหน ตามสเปก)
-
-    ถ้าแก้ : สิทธิ์เหมือน export/mco5 ทุกประการ (admin/อาจารย์เจ้าของ offering เท่านั้นที่เข้าได้ตาม
-             resolve_mco5_export_access() - role อื่นก็ยังเข้าได้ แค่ไม่มีชีตรายบุคคลซึ่ง Word ไม่มีอยู่
-             แล้ว)
-    """
-    offering, _include_personal_sheet = resolve_mco5_export_access(db, offering_id, current_user)
-
-    docx_bytes = build_mco5_docx(db, offering, target_rate=Decimal(str(target_rate)))
-
-    filename = (
-        f"mco5_{offering.course.course_code}_{offering.academic_year}-{offering.semester}"
-        f"_sec{offering.section}.docx"
-    )
-    return StreamingResponse(
-        docx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

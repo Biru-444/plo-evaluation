@@ -1,14 +1,15 @@
 """
-Tests สำหรับ GET /clo-achievement/export/mco5 (ดู TASK-export-mco5.md) - export ข้อมูลประกอบ มคอ.5
-เป็น Excel (5 ชีต) ของ course_offering เดียว ครอบคลุมทั้งความถูกต้องของตัวเลข (ต้องตรงกับ
-GET /clo-achievement ที่ใช้สูตรเดียวกันจาก clo_achievement_service.py), สิทธิ์การเข้าถึง
-(admin/อาจารย์เจ้าของ/role อื่น), และ edge case (CLO ไม่มีชิ้นงานผูก, ยังไม่มีเกรด)
+Tests สำหรับ GET /clo-achievement/export - export รายงานผลบรรลุ CLO เป็น Excel (6 ชีต) ของ
+course_offering เดียว ครอบคลุมทั้งความถูกต้องของตัวเลข (ต้องตรงกับ GET /clo-achievement ที่ใช้สูตร
+เดียวกันจาก clo_achievement_service.py), สิทธิ์การเข้าถึง (admin/อาจารย์เจ้าของ/role อื่น), และ
+edge case (CLO ไม่มีชิ้นงานผูก, ยังไม่มีเกรด)
 
 ใช้ fixture pattern เดียวกับ tests/test_courses_enrolled_students_mastery.py (สร้างข้อมูลเองใน
 db_session ทุกเทส ไม่พึ่งข้อมูลที่มีอยู่ก่อน - rollback อัตโนมัติหลังจบเทสตาม conftest.py)
 """
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
 import pytest
@@ -53,15 +54,15 @@ def make_client(db_session):
 
 
 def _make_curriculum_course_offering(db_session, instructor=None, section="1"):
-    curriculum = Curriculum(name="Test Curriculum MCO5", year=2569)
+    curriculum = Curriculum(name="Test Curriculum CLO Report", year=2569)
     db_session.add(curriculum)
     db_session.flush()
 
     course = Course(
         curriculum_id=curriculum.id,
-        course_code="MCO5TEST1",
-        name_th="วิชาทดสอบ มคอ.5",
-        name_en="MCO5 Test Course",
+        course_code="CLORPT1",
+        name_th="วิชาทดสอบรายงาน CLO",
+        name_en="CLO Report Test Course",
         credit=3,
         category="วิชาแกน",
     )
@@ -120,16 +121,26 @@ def _add_clo_with_score(db_session, *, course, offering, clo_code, admin_user_id
     return clo
 
 
-def _sheet2_rows(wb):
+def _sheet_clo_rows(wb):
     ws = wb["ผลการบรรลุ CLO"]
     rows = list(ws.iter_rows(min_row=2, values_only=False))
     return {row[0].value: row for row in rows}  # keyed by CLO code
 
 
-class TestExportSucceedsWithFiveSheets:
-    def test_export_returns_xlsx_with_five_sheets(self, client, db_session, admin_user):
+ALL_SHEET_NAMES = [
+    "คำอธิบาย",
+    "ข้อมูลรายวิชา",
+    "ผลการบรรลุ CLO",
+    "สรุปผลการเรียน",
+    "การยืนยันผลสัมฤทธิ์",
+    "รายบุคคล",
+]
+
+
+class TestExportSucceedsWithSixSheets:
+    def test_export_returns_xlsx_with_six_sheets(self, client, db_session, admin_user):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
-        student = _enroll_student(db_session, offering, "MCO5-001", final_grade="A")
+        student = _enroll_student(db_session, offering, "CLORPT-001", final_grade="A")
         _add_clo_with_score(
             db_session,
             course=course,
@@ -140,29 +151,61 @@ class TestExportSucceedsWithFiveSheets:
         )
         db_session.commit()
 
-        resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        assert "mco5_MCO5TEST1" in resp.headers["content-disposition"]
+        assert "clo_report_CLORPT1" in resp.headers["content-disposition"]
 
         wb = load_workbook(BytesIO(resp.content))
-        assert wb.sheetnames == [
-            "ข้อมูลรายวิชา",
-            "ผลการบรรลุ CLO",
-            "สรุปผลการเรียน",
-            "การยืนยันผลสัมฤทธิ์",
-            "รายบุคคล",
-        ]
+        assert wb.sheetnames == ALL_SHEET_NAMES
 
 
-class TestSheet2MatchesGetCloAchievement:
-    def test_sheet2_numbers_match_endpoint(self, client, db_session, admin_user):
+class TestExplanationSheet:
+    def test_explanation_sheet_mentions_target_rate_and_has_timestamp(
+        self, client, db_session, admin_user
+    ):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
-        s1 = _enroll_student(db_session, offering, "MCO5-010")
-        s2 = _enroll_student(db_session, offering, "MCO5-011")
-        s3 = _enroll_student(db_session, offering, "MCO5-012")
+        db_session.commit()
+
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}&target_rate=75")
+        assert resp.status_code == 200
+        wb = load_workbook(BytesIO(resp.content))
+        ws = wb["คำอธิบาย"]
+
+        labels = [ws.cell(row=r, column=1).value for r in range(3, ws.max_row + 1)]
+        values = [ws.cell(row=r, column=2).value for r in range(3, ws.max_row + 1)]
+        rows_by_label = dict(zip(labels, values))
+
+        assert any("เกณฑ์ระดับรายวิชา" in label for label in labels)
+        target_rate_value = next(v for k, v in rows_by_label.items() if "เกณฑ์ระดับรายวิชา" in k)
+        assert "75" in target_rate_value
+
+        assert any("export" in label.lower() for label in labels)
+        assert any("ผ่าน" in label for label in labels)
+        assert any("บรรลุ" in label for label in labels)
+        assert any("สูตร" in label for label in labels)
+
+        # ไม่ยึดตามแบบฟอร์มราชการ - ต้องไม่มีคำอ้างอิงหมวด/ข้อแบบ มคอ.5 (เช่น "หมวด 1", "หมวด 3 ข้อ 1-4")
+        # หลงเหลืออยู่ในชีตไหนเลย ("หมวดวิชา" ซึ่งเป็นชื่อฟิลด์ category ของวิชาเองไม่นับ - เป็นคำละ
+        # ความหมายกันคนละเรื่อง)
+        for name in wb.sheetnames:
+            ws2 = wb[name]
+            for row in ws2.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        assert "มคอ." not in cell.value
+                        assert "OBE5" not in cell.value
+                        assert not re.search(r"หมวด\s*\d", cell.value)
+
+
+class TestSheetMatchesGetCloAchievement:
+    def test_clo_sheet_numbers_match_endpoint(self, client, db_session, admin_user):
+        curriculum, course, offering = _make_curriculum_course_offering(db_session)
+        s1 = _enroll_student(db_session, offering, "CLORPT-010")
+        s2 = _enroll_student(db_session, offering, "CLORPT-011")
+        s3 = _enroll_student(db_session, offering, "CLORPT-012")
         _add_clo_with_score(
             db_session,
             course=course,
@@ -177,9 +220,9 @@ class TestSheet2MatchesGetCloAchievement:
         assert api_resp.status_code == 200
         api_clo = api_resp.json()["clo_achievements"][0]
 
-        export_resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        export_resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         wb = load_workbook(BytesIO(export_resp.content))
-        rows = _sheet2_rows(wb)
+        rows = _sheet_clo_rows(wb)
         row = rows["CLO1"]
 
         assert row[6].value == api_clo["passed_count"]  # col 7: ผ่าน (คน)
@@ -191,8 +234,8 @@ class TestSheet2MatchesGetCloAchievement:
 class TestStatusChangesWithTargetRate:
     def test_status_flips_between_low_and_high_target_rate(self, client, db_session, admin_user):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
-        s1 = _enroll_student(db_session, offering, "MCO5-020")
-        s2 = _enroll_student(db_session, offering, "MCO5-021")
+        s1 = _enroll_student(db_session, offering, "CLORPT-020")
+        s2 = _enroll_student(db_session, offering, "CLORPT-021")
         # 1 ผ่าน 1 ไม่ผ่าน -> achieved_rate_percent = 50.0
         _add_clo_with_score(
             db_session,
@@ -204,15 +247,11 @@ class TestStatusChangesWithTargetRate:
         )
         db_session.commit()
 
-        low_resp = client.get(
-            f"/clo-achievement/export/mco5?offering_id={offering.id}&target_rate=40"
-        )
-        high_resp = client.get(
-            f"/clo-achievement/export/mco5?offering_id={offering.id}&target_rate=90"
-        )
+        low_resp = client.get(f"/clo-achievement/export?offering_id={offering.id}&target_rate=40")
+        high_resp = client.get(f"/clo-achievement/export?offering_id={offering.id}&target_rate=90")
 
-        low_status = _sheet2_rows(load_workbook(BytesIO(low_resp.content)))["CLO1"][10].value
-        high_status = _sheet2_rows(load_workbook(BytesIO(high_resp.content)))["CLO1"][10].value
+        low_status = _sheet_clo_rows(load_workbook(BytesIO(low_resp.content)))["CLO1"][10].value
+        high_status = _sheet_clo_rows(load_workbook(BytesIO(high_resp.content)))["CLO1"][10].value
 
         assert low_status == "บรรลุ"
         assert high_status == "ไม่บรรลุ"
@@ -221,15 +260,14 @@ class TestStatusChangesWithTargetRate:
 class TestGradeDistribution:
     def test_percentage_and_total_row_are_correct(self, client, db_session, admin_user):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
-        # 45 คนทั้งหมด, 3 คนได้ I -> 3/45 = 6.666...% ต้องปัดเป็น 6.67 (ตัวอย่างจริงที่เคยพิมพ์ผิดเป็น
-        # 5.95% ใน มคอ.5 จริง - ดู TASK-export-mco5.md)
+        # 45 คนทั้งหมด, 3 คนได้ I -> 3/45 = 6.666...% ต้องปัดเป็น 6.67
         for i in range(42):
-            _enroll_student(db_session, offering, f"MCO5-G{i:03d}", final_grade="A")
+            _enroll_student(db_session, offering, f"CLORPT-G{i:03d}", final_grade="A")
         for i in range(3):
-            _enroll_student(db_session, offering, f"MCO5-GI{i:03d}", final_grade="I")
+            _enroll_student(db_session, offering, f"CLORPT-GI{i:03d}", final_grade="I")
         db_session.commit()
 
-        resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         wb = load_workbook(BytesIO(resp.content))
         ws = wb["สรุปผลการเรียน"]
 
@@ -244,12 +282,12 @@ class TestGradeDistribution:
     def test_withdrawn_excluded_from_remaining(self, client, db_session, admin_user):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
         for i in range(8):
-            _enroll_student(db_session, offering, f"MCO5-R{i:03d}", final_grade="B")
+            _enroll_student(db_session, offering, f"CLORPT-R{i:03d}", final_grade="B")
         for i in range(2):
-            _enroll_student(db_session, offering, f"MCO5-W{i:03d}", final_grade="W")
+            _enroll_student(db_session, offering, f"CLORPT-W{i:03d}", final_grade="W")
         db_session.commit()
 
-        resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         wb = load_workbook(BytesIO(resp.content))
         ws = wb["สรุปผลการเรียน"]
 
@@ -259,10 +297,10 @@ class TestGradeDistribution:
 
     def test_no_grades_at_all_shows_note(self, client, db_session, admin_user):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
-        _enroll_student(db_session, offering, "MCO5-NG1", final_grade=None)
+        _enroll_student(db_session, offering, "CLORPT-NG1", final_grade=None)
         db_session.commit()
 
-        resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         wb = load_workbook(BytesIO(resp.content))
         ws = wb["สรุปผลการเรียน"]
         assert "ยังไม่มีข้อมูลเกรด" in ws.cell(row=6, column=1).value
@@ -271,40 +309,40 @@ class TestGradeDistribution:
 class TestAccessControl:
     def test_instructor_not_owner_returns_403(self, make_client, db_session, admin_user):
         owner = User(
-            username="mco5-owner", password="x", first_name="เจ้าของ", last_name="วิชา", role="instructor"
+            username="clorpt-owner", password="x", first_name="เจ้าของ", last_name="วิชา", role="instructor"
         )
         other = User(
-            username="mco5-other", password="x", first_name="คนอื่น", last_name="ไม่เกี่ยว", role="instructor"
+            username="clorpt-other", password="x", first_name="คนอื่น", last_name="ไม่เกี่ยว", role="instructor"
         )
         db_session.add_all([owner, other])
         db_session.flush()
         curriculum, course, offering = _make_curriculum_course_offering(db_session, instructor=owner)
         db_session.commit()
 
-        resp = make_client(other).get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = make_client(other).get(f"/clo-achievement/export?offering_id={offering.id}")
         assert resp.status_code == 403
 
     def test_owning_instructor_can_export(self, make_client, db_session, admin_user):
         owner = User(
-            username="mco5-owner2", password="x", first_name="เจ้าของ", last_name="วิชา", role="instructor"
+            username="clorpt-owner2", password="x", first_name="เจ้าของ", last_name="วิชา", role="instructor"
         )
         db_session.add(owner)
         db_session.flush()
         curriculum, course, offering = _make_curriculum_course_offering(db_session, instructor=owner)
         db_session.commit()
 
-        resp = make_client(owner).get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = make_client(owner).get(f"/clo-achievement/export?offering_id={offering.id}")
         assert resp.status_code == 200
 
     def test_nonexistent_offering_returns_404(self, client):
-        resp = client.get("/clo-achievement/export/mco5?offering_id=999999")
+        resp = client.get("/clo-achievement/export?offering_id=999999")
         assert resp.status_code == 404
 
     def test_other_role_gets_no_personal_sheet(self, make_client, db_session, admin_user):
         """role ที่ไม่ใช่ admin/instructor (เช่น ประธานหลักสูตร ถ้ามีในอนาคต) - ได้ไฟล์แต่ไม่มีชีต
         รายบุคคล (ข้อมูล PDPA)"""
         coordinator = User(
-            username="mco5-coordinator",
+            username="clorpt-coordinator",
             password="x",
             first_name="ประธาน",
             last_name="หลักสูตร",
@@ -315,17 +353,17 @@ class TestAccessControl:
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
         db_session.commit()
 
-        resp = make_client(coordinator).get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = make_client(coordinator).get(f"/clo-achievement/export?offering_id={offering.id}")
         assert resp.status_code == 200
         wb = load_workbook(BytesIO(resp.content))
         assert "รายบุคคล" not in wb.sheetnames
-        assert len(wb.sheetnames) == 4
+        assert len(wb.sheetnames) == 5
 
     def test_admin_gets_personal_sheet(self, client, db_session):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
         db_session.commit()
 
-        resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         assert resp.status_code == 200
         wb = load_workbook(BytesIO(resp.content))
         assert "รายบุคคล" in wb.sheetnames
@@ -334,7 +372,7 @@ class TestAccessControl:
 class TestCloWithoutAssessmentItem:
     def test_clo_without_any_item_shows_no_data_status_not_error(self, db_session, admin_user, client):
         curriculum, course, offering = _make_curriculum_course_offering(db_session)
-        _enroll_student(db_session, offering, "MCO5-030")
+        _enroll_student(db_session, offering, "CLORPT-030")
         clo = CLO(
             course_id=course.id,
             code="CLO-NOITEM",
@@ -345,8 +383,8 @@ class TestCloWithoutAssessmentItem:
         db_session.add(clo)
         db_session.commit()
 
-        resp = client.get(f"/clo-achievement/export/mco5?offering_id={offering.id}")
+        resp = client.get(f"/clo-achievement/export?offering_id={offering.id}")
         assert resp.status_code == 200
         wb = load_workbook(BytesIO(resp.content))
-        row = _sheet2_rows(wb)["CLO-NOITEM"]
+        row = _sheet_clo_rows(wb)["CLO-NOITEM"]
         assert row[10].value == "ไม่มีข้อมูล"  # col 11: สถานะ

@@ -6,16 +6,16 @@
 
          refactor ออกมาจาก app/routes/clo_calculation.py::get_offering_clo_achievement เดิม (ตรรกะเดียว
          เป๊ะ ย้ายมาไว้ที่นี่เฉยๆ) เพราะตอนนี้มี 2 ผู้เรียก: endpoint เดิม (GET /clo-achievement) กับ
-         export มคอ.5 (GET /clo-achievement/export/mco5) - ทั้งคู่ต้องได้ตัวเลขตรงกันเป๊ะเสมอ ห้ามมีสูตร
+         export รายงาน CLO (GET /clo-achievement/export) - ทั้งคู่ต้องได้ตัวเลขตรงกันเป๊ะเสมอ ห้ามมีสูตร
          คำนวณแยกสองชุดที่อาจ drift
 
 เชื่อมกับ : compute_offering_clo_achievement_raw() คือรุ่นละเอียด (Decimal/None แยกแยะ "ไม่มีข้อมูล"
-            ออกจาก "ได้ 0% จริง" ได้ตรงๆ) ใช้โดย mco5_export_service.py ที่ต้องการค่าเฉลี่ยเฉพาะคนที่มี
-            ข้อมูลจริง (ไม่ปนคนที่ไม่มีคะแนนเข้าไปเป็น 0) - compute_offering_clo_achievement() ห่อรุ่น
+            ออกจาก "ได้ 0% จริง" ได้ตรงๆ) ใช้โดย clo_report_export_service.py ที่ต้องการค่าเฉลี่ยเฉพาะคน
+            ที่มีข้อมูลจริง (ไม่ปนคนที่ไม่มีคะแนนเข้าไปเป็น 0) - compute_offering_clo_achievement() ห่อรุ่น
             ละเอียดนั้นให้เป็น response shape เดิมของ GET /clo-achievement เป๊ะ (clo_percent/passed ของคน
             ไม่มีข้อมูลกลายเป็น 0.0/False เหมือนพฤติกรรมเดิมก่อน refactor ทุกประการ)
 
-ถ้าแก้ : เปลี่ยนสูตรตรงนี้กระทบทั้ง GET /clo-achievement และไฟล์ export มคอ.5 พร้อมกันทันที ต้องตรงกับ
+ถ้าแก้ : เปลี่ยนสูตรตรงนี้กระทบทั้ง GET /clo-achievement และไฟล์ export รายงาน CLO พร้อมกันทันที ต้องตรงกับ
          สูตรใน plo_calculation.py เสมอ (คนละ scope แต่สูตรเดียวกัน)
 """
 from __future__ import annotations
