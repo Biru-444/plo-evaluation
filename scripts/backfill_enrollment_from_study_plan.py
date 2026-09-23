@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import text
 
 from app.database import engine
+from app.services.year_level import current_year_level
 
 ACADEMIC_YEAR_BASE = 2500
 
@@ -33,7 +34,7 @@ ACADEMIC_YEAR_BASE = 2500
 def main():
     with engine.begin() as conn:
         students = conn.execute(
-            text("SELECT id, curriculum_id, cohort_year, current_year_level FROM student")
+            text("SELECT id, curriculum_id, cohort_year FROM student")
         ).all()
 
         study_plan_rows = conn.execute(
@@ -70,12 +71,13 @@ def main():
         ambiguous_impact: dict[tuple[str, str, int, int], int] = defaultdict(int)
 
         for student in students:
-            plan_rows = [
-                r for r in plan_by_curriculum.get(student.curriculum_id, [])
-                if r.year_level <= student.current_year_level
-            ]
             if student.cohort_year is None:
                 continue
+            student_year_level = current_year_level(student.cohort_year).level
+            plan_rows = [
+                r for r in plan_by_curriculum.get(student.curriculum_id, [])
+                if r.year_level <= student_year_level
+            ]
 
             for plan_row in plan_rows:
                 if plan_row.course_id in existing_course_ids_by_student[student.id]:

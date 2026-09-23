@@ -235,7 +235,7 @@ def seed_course_plos(db: Session, courses: list[Course], plos: list[PLO]) -> lis
 def seed_students(db: Session, curriculum: Curriculum) -> list[Student]:
     students = [
         Student(id=f"65000{i + 1:02d}", curriculum_id=curriculum.id, first_name=first,
-                last_name=last, cohort_year=2024, current_year_level=1)
+                last_name=last, cohort_year=2024)
         for i, (first, last) in enumerate(STUDENT_NAMES)
     ]
     db.add_all(students)

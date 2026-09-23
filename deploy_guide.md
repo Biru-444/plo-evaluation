@@ -54,3 +54,12 @@ production ทำให้ endpoint ที่ SELECT คอลัมน์นี
    จะ log เป็น ERROR ใน Render logs ทันที (ไม่ crash แอป) เป็นตาข่ายรองรับชั้นสุดท้ายเผื่อลืมทำขั้นตอน 1-2
    ข้างบน แต่ **อย่าพึ่งพาตาข่ายนี้อย่างเดียว** — ควรรัน migration ก่อน deploy เสมอ เพราะระหว่างที่ยังไม่ได้
    รัน endpoint ที่พึ่งพา schema นั้นจะ 500 ไปเรื่อยๆ จนกว่าจะรันจริง
+
+**⚠️ `check_schema()` เช็คได้แค่ "คอลัมน์ที่โมเดลคาดหวังหายไปจาก DB" เท่านั้น — เช็คทิศทางตรงข้ามไม่ได้
+(คอลัมน์ที่ยังอยู่ใน DB จริงแต่โมเดลลบไปแล้ว ไม่ถูกรายงานเป็น gap) migration ที่ DROP COLUMN จึงต้องรันเอง
+ตามขั้นตอน 1 เสมอ จะพึ่งตาข่ายข้อ 3 ไม่ได้เลยสำหรับกรณีนี้**
+
+**Pending บน production ณ ตอนนี้**: `scripts/migrate_drop_student_current_year_level.py` (ลบ
+`student.current_year_level` — เปลี่ยนไปคำนวณสดจาก `cohort_year` แทน ดู
+`app/services/year_level.py`) รันบน local dev แล้ว ยังไม่รันบน production — รอ production reset
+(ผู้ใช้จะรันเอง)

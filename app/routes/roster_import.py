@@ -31,7 +31,6 @@ import re
 import secrets
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from openpyxl import load_workbook
@@ -178,18 +177,6 @@ def split_instructor_name(raw: str) -> tuple[str | None, str, str]:
     else:
         title, first, last = None, "", ""
     return title, first, last
-
-
-def compute_year_level(cohort_year_2digit: int) -> int:
-    """คำนวณชั้นปีปัจจุบันของนักศึกษาใหม่ ณ วันที่รันจริง (ไม่ใช่ตอน parse ไฟล์) จากปี พ.ศ. 2 หลักของรุ่น
-    เช่น cohort_year=66 → เข้าปีการศึกษา 2566 ปีการศึกษาเริ่มประมาณเดือนมิถุนายน จึงนับปีการศึกษาปัจจุบัน
-    ถอยหลัง 1 ถ้ายังไม่ถึงเดือนมิถุนายน แล้ว clamp ผลลัพธ์ไว้ระหว่างปี 1-4"""
-    today = date.today()
-    buddhist_2digit = (today.year + 543) % 100
-    if today.month < 6:
-        buddhist_2digit = (buddhist_2digit - 1) % 100
-    level = buddhist_2digit - cohort_year_2digit + 1
-    return max(1, min(4, level))
 
 
 # ทำอะไร : อ่านไฟล์ดิบ (.xls/.xlsx) แล้วสแกนหาข้อมูลที่ต้องใช้ทั้งหมดด้วยการจับคู่ข้อความ/หัวคอลัมน์ที่
@@ -413,7 +400,6 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
     for i, (sid, title, first, last) in enumerate(parsed.students, start=1):
         existing_student = db.get(Student, sid)
         if existing_student is None:
-            level = compute_year_level(parsed.cohort_year if parsed.cohort_year is not None else int(sid[:2]))
             row = RosterImportStudentRow(
                 line_no=i, student_id=sid, title=title, first_name=first, last_name=last, action="create",
             )
@@ -427,7 +413,8 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
                     title=title,
                     section=parsed.section,
                     cohort_year=parsed.cohort_year if parsed.cohort_year is not None else int(sid[:2]),
-                    current_year_level=level,
+                    # current_year_level ไม่ใช่ column แล้ว - คำนวณสดจาก cohort_year เสมอ (ดู
+                    # app/services/year_level.py / Student.current_year_level property)
                 ))
             to_enroll_ids.append(sid)
         elif existing_student.curriculum_id != course.curriculum_id:

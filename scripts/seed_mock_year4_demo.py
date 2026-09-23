@@ -52,7 +52,7 @@ from app.models import (
 
 CURRICULUM_ID = 1
 COHORT_YEAR = 66  # รุ่นที่ควรอยู่ชั้นปีที่ 4 ในปีการศึกษาปัจจุบัน (ตรงกับนักศึกษาจริงรุ่น 66 ที่มีอยู่แล้ว)
-CURRENT_YEAR_LEVEL = 4
+# current_year_level ไม่ใช่ column แล้ว - คำนวณสดจาก cohort_year เสมอ (ดู app/services/year_level.py)
 MOCK_ACADEMIC_YEAR = 9999
 MOCK_SECTION = "MOCK"
 
@@ -111,7 +111,6 @@ def main():
                     title=title,
                     status="กำลังศึกษา",
                     cohort_year=COHORT_YEAR,
-                    current_year_level=CURRENT_YEAR_LEVEL,
                 )
             )
         db.flush()

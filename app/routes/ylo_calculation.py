@@ -53,6 +53,7 @@ from app.models import (
     YLOPLOMapping,
 )
 from app.routes.plo_calculation import _clo_passed
+from app.services.year_level import current_year_level, min_cohort_year_for_level
 
 router = APIRouter(prefix="/ylo", tags=["YLO Achievement"])
 
@@ -87,7 +88,7 @@ class StudentYLOCourseItem(BaseModel):
 class StudentYLOYearItem(BaseModel):
     year_level: int
     ylo_description: str
-    is_reached: bool  # student.current_year_level >= year_level แล้วหรือยัง
+    is_reached: bool  # current_year_level(student.cohort_year).level >= year_level แล้วหรือยัง
     is_achieved: bool
     courses: list[StudentYLOCourseItem]
 
@@ -337,9 +338,11 @@ def get_ylo_achievement(
     เชื่อมกับ : ใช้ _build_ylo_requirements + _clo_mastery_for_student (คำนวณทีละคนในลูป ไม่ได้ batch
                 เหมือนฝั่ง PLO — ดู "ถ้าแก้" ด้านล่าง) และ _year_courses — เรียกโดยหน้า "YLO ตามชั้นปี"
 
-    ถ้าแก้ : เฉพาะนักศึกษาที่ current_year_level >= year_level ที่ขอเท่านั้นถึงจะถูกนับ (คนที่ยังเรียน
-             ไม่ถึงปีนี้ยังไม่มีโอกาสสอบวิชาที่กำหนด YLO ปีนี้ ไม่ควรถูกนับเป็น "ไม่บรรลุ") ฟังก์ชันนี้
-             วน query mastery ทีละนักศึกษาในลูป (ไม่ batch เหมือน plo_calculation.py) — ถ้า roster
+    ถ้าแก้ : เฉพาะนักศึกษาที่ชั้นปีปัจจุบัน (คำนวณสดจาก cohort_year - ดู app/services/year_level.py) >=
+             year_level ที่ขอเท่านั้นถึงจะถูกนับ (คนที่ยังเรียนไม่ถึงปีนี้ยังไม่มีโอกาสสอบวิชาที่กำหนด
+             YLO ปีนี้ ไม่ควรถูกนับเป็น "ไม่บรรลุ") กรองที่ระดับ SQL ผ่าน min_cohort_year_for_level()
+             (เทียบ cohort_year ตรงๆ) แทนการดึงนักศึกษาทุกคนมาคำนวณทีละคนในหน่วยความจำ ฟังก์ชันนี้วน
+             query mastery ทีละนักศึกษาในลูป (ไม่ batch เหมือน plo_calculation.py) — ถ้า roster
              ใหญ่ขึ้นมากในอนาคต อาจต้องปรับให้ batch แบบเดียวกันเพื่อความเร็ว
     """
     curriculum = db.get(Curriculum, curriculum_id)
@@ -362,11 +365,13 @@ def get_ylo_achievement(
         }
     )
 
-    # เฉพาะนักศึกษาที่เรียนถึงชั้นปีนี้แล้ว (current_year_level >= year_level ที่ขอ) - ปีนี้ยังไม่ถึง
-    # แปลว่ายังไม่มีโอกาสได้เรียน/สอบวิชาที่กำหนด YLO ปีนี้เลย จึงไม่ควรถูกนับเป็น "ไม่บรรลุ" ปนเข้ามา
+    # เฉพาะนักศึกษาที่เรียนถึงชั้นปีนี้แล้ว (ชั้นปีจริง >= year_level ที่ขอ) - ปีนี้ยังไม่ถึงแปลว่ายังไม่มี
+    # โอกาสได้เรียน/สอบวิชาที่กำหนด YLO ปีนี้เลย จึงไม่ควรถูกนับเป็น "ไม่บรรลุ" ปนเข้ามา - กรองผ่าน
+    # cohort_year ตรงๆ (min_cohort_year_for_level เป็นด้านกลับของ current_year_level()) แทนการดึง
+    # นักศึกษาทุกคนมาคำนวณทีละคนในหน่วยความจำ
     students_query = db.query(Student).filter(
         Student.curriculum_id == curriculum_id,
-        Student.current_year_level >= year_level,
+        Student.cohort_year <= min_cohort_year_for_level(year_level),
     )
     if cohort_year is not None:
         students_query = students_query.filter(Student.cohort_year == cohort_year)
@@ -460,6 +465,8 @@ def get_student_ylo_achievement(
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
 
+    student_year_level = current_year_level(student.cohort_year).level
+
     ylo_by_year = {
         y.year_level: y
         for y in db.query(YLO).filter(YLO.curriculum_id == student.curriculum_id).all()
@@ -518,7 +525,7 @@ def get_student_ylo_achievement(
             StudentYLOYearItem(
                 year_level=year_level,
                 ylo_description=ylo.description if ylo is not None else "",
-                is_reached=student.current_year_level >= year_level,
+                is_reached=student_year_level >= year_level,
                 is_achieved=is_achieved,
                 courses=course_items,
             )

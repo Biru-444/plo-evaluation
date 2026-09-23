@@ -101,7 +101,6 @@ def main():
         # --- 1. นักศึกษาทดสอบ ---
         student_ids: list[str] = []
         for i in range(1, NUM_STUDENTS + 1):
-            year_level = (i - 1) // 4 + 1
             title = "นาย" if i % 2 == 1 else "นางสาว"
             db.add(
                 Student(
@@ -112,7 +111,6 @@ def main():
                     title=title,
                     status="กำลังศึกษา",
                     cohort_year=MOCK_COHORT_YEAR,
-                    current_year_level=year_level,
                 )
             )
             student_ids.append(student_id(i))

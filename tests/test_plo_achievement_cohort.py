@@ -53,7 +53,6 @@ def test_cohort_achievement_end_to_end_with_clo_plo_mapping(client, db_session, 
         first_name="ทดสอบ",
         last_name="นักศึกษา",
         cohort_year=69,
-        current_year_level=1,
     )
     db_session.add(student)
     db_session.add(Enrollment(student_id=student.id, offering_id=offering.id))
@@ -122,7 +121,6 @@ def test_clos_of_same_course_mapped_to_different_plos_are_evaluated_independentl
         first_name="ทดสอบ",
         last_name="แยก PLO",
         cohort_year=69,
-        current_year_level=1,
     )
     db_session.add(student)
     db_session.add(Enrollment(student_id=student.id, offering_id=offering.id))
@@ -209,7 +207,6 @@ class TestWeightedFormula:
             first_name="ทดสอบ",
             last_name="ถ่วงน้ำหนัก",
             cohort_year=69,
-            current_year_level=1,
         )
         db_session.add(student)
         db_session.add(Enrollment(student_id=student.id, offering_id=offering.id))

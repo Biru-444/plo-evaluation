@@ -89,7 +89,6 @@ def _enroll_student(db_session, offering, student_id, final_grade=None):
         first_name="ทดสอบ",
         last_name=student_id,
         cohort_year=69,
-        current_year_level=1,
     )
     db_session.add(student)
     db_session.add(Enrollment(student_id=student.id, offering_id=offering.id, final_grade=final_grade))

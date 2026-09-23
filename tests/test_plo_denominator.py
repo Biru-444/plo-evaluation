@@ -55,14 +55,13 @@ def _make_curriculum_plo_course(db_session, name="Test Denominator Curriculum"):
     return curriculum, plo, course, offering
 
 
-def _enroll_student(db_session, curriculum, offering, student_id, cohort_year=69, year_level=1):
+def _enroll_student(db_session, curriculum, offering, student_id, cohort_year=69):
     student = Student(
         id=student_id,
         curriculum_id=curriculum.id,
         first_name="ทดสอบ",
         last_name=student_id,
         cohort_year=cohort_year,
-        current_year_level=year_level,
     )
     db_session.add(student)
     db_session.add(Enrollment(student_id=student.id, offering_id=offering.id))
@@ -256,8 +255,8 @@ class TestByYearEndpointUsesSameFormula:
             StudyPlan(curriculum_id=curriculum.id, course_id=course.id, cohort_year=None, year_level=1, semester=1)
         )
 
-        s1 = _enroll_student(db_session, curriculum, offering, "DENOM-BY1", year_level=1)
-        s2 = _enroll_student(db_session, curriculum, offering, "DENOM-BY2", year_level=1)
+        s1 = _enroll_student(db_session, curriculum, offering, "DENOM-BY1")
+        s2 = _enroll_student(db_session, curriculum, offering, "DENOM-BY2")
         db_session.add(StudentScore(item_id=item.id, student_id=s1.id, score_obtained=90.0))
         # s2 ไม่มีคะแนนเลย -> ไม่มีข้อมูล
         db_session.commit()
@@ -280,7 +279,7 @@ class TestByYearEndpointUsesSameFormula:
         db_session.add(
             StudyPlan(curriculum_id=curriculum.id, course_id=course.id, cohort_year=None, year_level=1, semester=1)
         )
-        _enroll_student(db_session, curriculum, offering, "DENOM-BY3", year_level=1)
+        _enroll_student(db_session, curriculum, offering, "DENOM-BY3")
         db_session.commit()
 
         resp = client.get(f"/plo/achievement/by-year?curriculum_id={curriculum.id}")

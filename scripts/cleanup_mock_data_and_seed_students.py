@@ -8,10 +8,11 @@ blank - filled in manually later).
   assessment_item, item_clo, student_score, clo, clo_plo_mapping.
 - Deletes the 8 mock demo students (6500001-6500008). Cascades to
   enrollment, student_score.
-- Upserts student 660112230001..660112230070 (curriculum_id=1, cohort_year=66,
-  current_year_level=4) with first_name/last_name cleared to "" - including
-  660112230012, which already existed with a real name (cleared per explicit
-  user confirmation, since it falls inside the new range).
+- Upserts student 660112230001..660112230070 (curriculum_id=1, cohort_year=66)
+  with first_name/last_name cleared to "" - including 660112230012, which
+  already existed with a real name (cleared per explicit user confirmation,
+  since it falls inside the new range). current_year_level is no longer a
+  stored column (derived live from cohort_year - see app/services/year_level.py).
 
 Idempotent: rerunning finds no mock rows left to delete, and re-upserts the
 same 70 blank-name student rows (0 changes on repeat runs).
@@ -41,7 +42,6 @@ MOCK_STUDENT_IDS = [f"65000{i:02d}" for i in range(1, 9)]
 NEW_STUDENT_IDS = [f"660112230{i:03d}" for i in range(1, 71)]
 
 COHORT_YEAR = 66
-CURRENT_YEAR_LEVEL = 4
 
 
 def delete_mock_courses(db) -> int:
@@ -78,7 +78,6 @@ def upsert_students(db) -> tuple[int, int]:
                     first_name="",
                     last_name="",
                     cohort_year=COHORT_YEAR,
-                    current_year_level=CURRENT_YEAR_LEVEL,
                 )
             )
             created += 1
@@ -89,7 +88,6 @@ def upsert_students(db) -> tuple[int, int]:
         fields = [
             ("curriculum_id", CURRICULUM_ID),
             ("cohort_year", COHORT_YEAR),
-            ("current_year_level", CURRENT_YEAR_LEVEL),
         ]
         if not has_real_name:
             fields.append(("first_name", ""))

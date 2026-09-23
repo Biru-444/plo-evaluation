@@ -19,7 +19,11 @@ class StudentSchema(BaseModel):
     status: StudentStatus = "กำลังศึกษา"
     section: str | None = None
     cohort_year: int
+    # ทั้งสอง field นี้คำนวณสดจาก cohort_year เสมอ (ดู Student.current_year_level/beyond_curriculum
+    # property ใน app/models/student.py) ไม่ใช่ column ที่ตั้งค่าได้โดยตรงอีกต่อไป - StudentCreateSchema/
+    # StudentUpdateSchema จึงไม่มี field นี้ (ดูด้านล่าง)
     current_year_level: int
+    beyond_curriculum: bool
 
 
 class EnrolledStudentSchema(StudentSchema):
@@ -55,7 +59,6 @@ class StudentCreateSchema(BaseModel):
     status: StudentStatus = "กำลังศึกษา"
     section: str | None = None
     cohort_year: int
-    current_year_level: int
 
 
 class StudentUpdateSchema(BaseModel):
@@ -67,4 +70,3 @@ class StudentUpdateSchema(BaseModel):
     status: StudentStatus | None = None
     section: str | None = None
     cohort_year: int | None = None
-    current_year_level: int | None = None
