@@ -49,7 +49,9 @@ from app.models import (
 )
 from app.schemas.clo_calculation import OfferingCLOAchievement
 from app.services.clo_achievement_service import compute_offering_clo_achievement
-from app.services.mco5_export_service import build_mco5_excel, resolve_mco5_export_access
+from app.services.mco5_data_service import resolve_mco5_export_access
+from app.services.mco5_docx_export_service import build_mco5_docx
+from app.services.mco5_export_service import build_mco5_excel
 
 router = APIRouter(prefix="/clo-achievement", tags=["CLO Achievement"])
 
@@ -119,8 +121,8 @@ def export_mco5_excel(
     ทำอะไร : export ข้อมูลประกอบ มคอ.5 (รายงานผลรายวิชา) ของ offering เดียวเป็นไฟล์ Excel (5 ชีต) -
              ตัวเลขทุกตัวคำนวณจากระบบ ไม่ให้อาจารย์คิดเลขเอง (ดู TASK-export-mco5.md)
 
-    เชื่อมกับ : resolve_mco5_export_access() (mco5_export_service.py) เช็คสิทธิ์ + หา offering ให้ในตัว
-                เดียว (404/403 จากตรงนั้น) แล้ว build_mco5_excel() ใช้
+    เชื่อมกับ : resolve_mco5_export_access() (mco5_data_service.py - ใช้ร่วมกับ export/mco5-docx ด้วย)
+                เช็คสิทธิ์ + หา offering ให้ในตัวเดียว (404/403 จากตรงนั้น) แล้ว build_mco5_excel() ใช้
                 compute_offering_clo_achievement_raw() คำนวณตัวเลข CLO ชุดเดียวกับ GET /clo-achievement
                 เป๊ะ (คนละฟังก์ชันแค่เพราะต้องการความละเอียดกว่า - ดู clo_achievement_service.py)
 
@@ -143,6 +145,41 @@ def export_mco5_excel(
     return StreamingResponse(
         workbook_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/export/mco5-docx")
+def export_mco5_docx(
+    offering_id: int = Query(..., description="Course offering ID"),
+    target_rate: float = Query(70.0, description="เกณฑ์ระดับรายวิชา (%) - CLO บรรลุเมื่อร้อยละที่ผ่าน >= ค่านี้"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    ทำอะไร : export ข้อมูลประกอบ มคอ.5 เป็นไฟล์ Word (.docx) ตามโครงแบบฟอร์ม OBE5 BRU (Phase 2 - ดู
+             TASK-export-mco5.md ข้อ 6) - ไม่มีส่วนข้อมูลรายบุคคล (ต่างจาก Excel)
+
+    เชื่อมกับ : ใช้ resolve_mco5_export_access() ตัวเดียวกับ export/mco5 (สิทธิ์เหมือนกันเป๊ะ) แล้ว
+                build_mco5_docx() ใช้ mco5_data_service.py ชุดเดียวกับ Excel export ไม่คำนวณ/query ซ้ำ -
+                include_personal_sheet ที่ resolve_mco5_export_access() คืนมาไม่ได้ใช้ตรงนี้ (Word ไม่มี
+                ส่วนรายบุคคลอยู่แล้วไม่ว่า role ไหน ตามสเปก)
+
+    ถ้าแก้ : สิทธิ์เหมือน export/mco5 ทุกประการ (admin/อาจารย์เจ้าของ offering เท่านั้นที่เข้าได้ตาม
+             resolve_mco5_export_access() - role อื่นก็ยังเข้าได้ แค่ไม่มีชีตรายบุคคลซึ่ง Word ไม่มีอยู่
+             แล้ว)
+    """
+    offering, _include_personal_sheet = resolve_mco5_export_access(db, offering_id, current_user)
+
+    docx_bytes = build_mco5_docx(db, offering, target_rate=Decimal(str(target_rate)))
+
+    filename = (
+        f"mco5_{offering.course.course_code}_{offering.academic_year}-{offering.semester}"
+        f"_sec{offering.section}.docx"
+    )
+    return StreamingResponse(
+        docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
