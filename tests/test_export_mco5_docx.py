@@ -4,17 +4,21 @@ Tests สำหรับ GET /clo-achievement/export/mco5-docx (Phase 2 - ดู
 
 ครอบคลุม: โครงเอกสาร (หัวเรื่อง, header OBE5 BRU, หมวด 1-6, ไม่มีส่วนรายบุคคล), ข้อมูลที่เติมอัตโนมัติ
 ตรงกับ Phase 1 (Excel) เป๊ะ (ใช้ mco5_data_service.py ชุดเดียวกัน - ไม่คำนวณซ้ำ), placeholder
-"[อาจารย์ผู้สอนกรอก]" ในส่วนที่ระบบไม่มีข้อมูล, ฟอนต์ TH Sarabun New, และสิทธิ์การเข้าถึงแบบเดียวกับ
-Excel export ทุกประการ (resolve_mco5_export_access() ตัวเดียวกัน)
+"[อาจารย์ผู้สอนกรอก]" ในส่วนที่ระบบไม่มีข้อมูล, ฟอนต์ TH Sarabun New รวมถึง complex-script properties
+(w:cs/w:szCs/w:bCs) ที่ Word ใช้จริงกับอักษรไทย (ไม่ใช่แค่ western w:sz/w:b ที่ run.font.*/style.font.*
+ของ python-docx ตั้งให้อัตโนมัติ), และสิทธิ์การเข้าถึงแบบเดียวกับ Excel export ทุกประการ
+(resolve_mco5_export_access() ตัวเดียวกัน)
 
 ใช้ fixture pattern เดียวกับ tests/test_export_mco5.py
 """
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
 import pytest
 from docx import Document
+from docx.oxml.ns import qn
 from fastapi.testclient import TestClient
 
 from app.auth import get_current_user
@@ -32,6 +36,8 @@ from app.models import (
     StudentScore,
     User,
 )
+
+THAI_CHAR_RE = re.compile(r"[฀-๿]")
 
 
 @pytest.fixture()
@@ -129,6 +135,20 @@ def _all_table_cell_texts(doc: Document) -> list[str]:
             for cell in row.cells:
                 texts.append(cell.text)
     return texts
+
+
+def _iter_all_runs(doc: Document):
+    """เดินทุก run ในเอกสาร - paragraph ระดับบนสุด, ทุก cell ของทุกตาราง, และ header - ครบทุกจุดที่
+    _set_font()/_set_cell_text() ใน mco5_docx_export_service.py แต่งค่าให้"""
+    for p in doc.paragraphs:
+        yield from p.runs
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    yield from p.runs
+    for p in doc.sections[0].header.paragraphs:
+        yield from p.runs
 
 
 class TestDocxStructure:
@@ -328,3 +348,67 @@ class TestDocxAccessControl:
             f"/clo-achievement/export/mco5-docx?offering_id={offering.id}"
         )
         assert resp.status_code == 200
+
+
+class TestDocxComplexScriptFonts:
+    """Word แยก property ของอักษรไทยเป็นคนละ slot จาก western text (w:cs/w:szCs/w:bCs/w:iCs แทน
+    w:rFonts ascii-hAnsi/w:sz/w:b/w:i) - python-docx's run.font.*/style.font.* ตั้งแค่ฝั่ง western
+    เท่านั้น ถ้า _apply_complex_script_properties() ใน mco5_docx_export_service.py ไม่ตั้ง cs คู่กันให้
+    ครบ Word จะ fallback ไปขนาด/น้ำหนักตัวอักษร default สำหรับอักษรไทยโดยเฉพาะ แม้ font name จะถูกแล้ว"""
+
+    def test_every_thai_run_has_matching_cs_font_and_size(self, client, db_session, admin_user):
+        curriculum, course, offering = _make_curriculum_course_offering(db_session)
+        student = _enroll_student(db_session, offering, "MCO5DX-CS1", final_grade="A")
+        _add_clo_with_score(
+            db_session,
+            course=course,
+            offering=offering,
+            clo_code="CLO1",
+            admin_user_id=admin_user.id,
+            scores={student.id: 90.0},
+        )
+        db_session.commit()
+
+        resp = client.get(f"/clo-achievement/export/mco5-docx?offering_id={offering.id}")
+        doc = Document(BytesIO(resp.content))
+
+        thai_runs_checked = 0
+        for run in _iter_all_runs(doc):
+            if not THAI_CHAR_RE.search(run.text):
+                continue
+            thai_runs_checked += 1
+            rpr = run._element.find(qn("w:rPr"))
+            assert rpr is not None, f"run {run.text!r} has no rPr at all"
+
+            rfonts = rpr.find(qn("w:rFonts"))
+            assert rfonts is not None, f"run {run.text!r} missing w:rFonts"
+            assert rfonts.get(qn("w:cs")) == "TH Sarabun New", f"run {run.text!r} wrong w:cs font"
+
+            sz = rpr.find(qn("w:sz"))
+            szcs = rpr.find(qn("w:szCs"))
+            assert sz is not None, f"run {run.text!r} missing w:sz"
+            assert szcs is not None, f"run {run.text!r} missing w:szCs"
+            assert szcs.get(qn("w:val")) == sz.get(qn("w:val")), (
+                f"run {run.text!r} w:szCs ({szcs.get(qn('w:val'))}) != w:sz ({sz.get(qn('w:val'))})"
+            )
+
+        # sanity: เอกสารนี้เต็มไปด้วยข้อความไทย (หัวเรื่อง, หมวด 1-6, ตาราง) ต้องเจอหลายสิบ run ไม่ใช่ 0
+        assert thai_runs_checked > 10
+
+    def test_heading_runs_have_bcs(self, client, db_session, admin_user):
+        curriculum, course, offering = _make_curriculum_course_offering(db_session)
+        db_session.commit()
+
+        resp = client.get(f"/clo-achievement/export/mco5-docx?offering_id={offering.id}")
+        doc = Document(BytesIO(resp.content))
+
+        heading_runs = [
+            run
+            for run in _iter_all_runs(doc)
+            if run.font.bold and THAI_CHAR_RE.search(run.text)
+        ]
+        assert len(heading_runs) > 0
+        for run in heading_runs:
+            rpr = run._element.find(qn("w:rPr"))
+            bcs = rpr.find(qn("w:bCs"))
+            assert bcs is not None, f"bold run {run.text!r} missing w:bCs"

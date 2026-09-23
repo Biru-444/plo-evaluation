@@ -49,22 +49,43 @@ PLACEHOLDER_TEXT = "[อาจารย์ผู้สอนกรอก]"
 GRAY = RGBColor(0x80, 0x80, 0x80)
 
 
+def _apply_complex_script_properties(rpr, size: Pt, *, bold: bool = False, italic: bool = False) -> None:
+    """ตั้ง font name/ขนาด/ตัวหนา/ตัวเอียงสำหรับ "complex script" (w:cs, w:szCs, w:bCs, w:iCs) ให้ rPr
+    ที่ส่งมา (ใช้ได้ทั้ง run-level และ style-level - โครง XML เหมือนกัน) - Word แยกอักษรไทยเป็นคนละ slot
+    จาก western text (w:rFonts ascii/hAnsi, w:sz, w:b, w:i ที่ python-docx's run.font.*/style.font.*
+    ตั้งให้อัตโนมัติอยู่แล้ว) ถ้าไม่ตั้ง cs คู่กันให้ครบทั้ง 4 ตัวตรงนี้ Word จะ fallback ไปค่า default
+    (มักเป็น 10pt ไม่ตัวหนา) สำหรับอักษรไทยโดยเฉพาะ แม้ font name (w:cs) จะตั้งถูกแล้วก็ตาม - เคยพลาดจุด
+    szCs/bCs/iCs มาก่อน (แก้เฉพาะ w:cs อย่างเดียว) หัวข้อหมวดที่ควรตัวหนา 18pt เลยจะแสดงเป็นค่า default
+    แทนสำหรับตัวอักษรไทย"""
+    rfonts = rpr.find(qn("w:rFonts"))
+    if rfonts is None:
+        rfonts = OxmlElement("w:rFonts")
+        rpr.append(rfonts)
+    rfonts.set(qn("w:cs"), FONT_NAME)
+
+    szcs = rpr.find(qn("w:szCs"))
+    if szcs is None:
+        szcs = OxmlElement("w:szCs")
+        rpr.append(szcs)
+    szcs.set(qn("w:val"), str(int(size.pt * 2)))  # หน่วยเป็นครึ่งจุด (half-points) เหมือน w:sz
+
+    if bold and rpr.find(qn("w:bCs")) is None:
+        rpr.append(OxmlElement("w:bCs"))
+    if italic and rpr.find(qn("w:iCs")) is None:
+        rpr.append(OxmlElement("w:iCs"))
+
+
 def _set_font(run, *, size: Pt = BODY_SIZE, bold: bool = False, italic: bool = False, color=None) -> None:
-    """ตั้งฟอนต์ TH Sarabun New ให้ run - ตั้งทั้ง ascii/hAnsi ผ่าน run.font.name ปกติ และ w:cs (complex
-    script - slot ที่ Word ใช้จริงกับอักษรไทย) ผ่าน XML ตรงๆ เพราะ python-docx ไม่มี property สำหรับ
-    w:cs โดยตรง - ขาดจุดนี้ไปตัว Word บางเครื่อง/บาง template จะ fallback เป็นฟอนต์ default เงียบๆ"""
+    """ตั้งฟอนต์ TH Sarabun New ให้ run - ตั้งทั้ง ascii/hAnsi ผ่าน run.font.name ปกติ (western) และ
+    complex-script properties ทั้งชุด (w:cs/w:szCs/w:bCs/w:iCs) ผ่าน _apply_complex_script_properties
+    เพราะ python-docx ไม่มี property สำหรับฝั่ง complex script โดยตรงเลย"""
     run.font.name = FONT_NAME
     run.font.size = size
     run.font.bold = bold
     run.font.italic = italic
     if color is not None:
         run.font.color.rgb = color
-    rpr = run._element.get_or_add_rPr()
-    rfonts = rpr.find(qn("w:rFonts"))
-    if rfonts is None:
-        rfonts = OxmlElement("w:rFonts")
-        rpr.append(rfonts)
-    rfonts.set(qn("w:cs"), FONT_NAME)
+    _apply_complex_script_properties(run._element.get_or_add_rPr(), size, bold=bold, italic=italic)
 
 
 def _add_paragraph(doc: Document, text: str, *, bold: bool = False, italic: bool = False, gray: bool = False):
@@ -219,6 +240,10 @@ def build_mco5_docx(db: Session, offering: CourseOffering, target_rate: Decimal)
     style = doc.styles["Normal"]
     style.font.name = FONT_NAME
     style.font.size = BODY_SIZE
+    # เผื่อ run ที่ไม่ได้ผ่าน _set_font เลย (เช่น run เริ่มต้นที่ python-docx อาจสร้างเองในบาง element)
+    # ให้ตกไปใช้ style เริ่มต้นที่ตั้ง complex-script properties ไว้ถูกต้องแล้วเหมือนกัน ไม่ fallback
+    # ไปฟอนต์/ขนาด default ของ Word เอง
+    _apply_complex_script_properties(style.element.get_or_add_rPr(), BODY_SIZE)
 
     _add_header_obe5_label(doc)
     _add_title(doc)
