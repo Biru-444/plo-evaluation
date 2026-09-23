@@ -129,8 +129,8 @@ def _build_sheet_plo_summary(
     ws = wb.create_sheet("สรุปการบรรลุ PLO")
     headers = [
         "PLO", "หมวด", "คำอธิบาย", "จำนวนวิชาที่วัด", "จำนวน CLO ที่ผูก", "นักศึกษาทั้งหมด",
-        "มีข้อมูล", "คะแนน PLO เฉลี่ย (%)", "บรรลุ (คน)", "ร้อยละที่บรรลุ (จากทั้งหมด)",
-        "ร้อยละที่บรรลุ (จากผู้มีข้อมูล)", "สถานะ",
+        "มีข้อมูล", "ความครอบคลุมข้อมูล (%)", "คะแนน PLO เฉลี่ย (%)", "บรรลุ (คน)",
+        "ร้อยละที่บรรลุ", "สถานะ",
     ]
     _header_row(ws, 1, headers)
 
@@ -139,8 +139,10 @@ def _build_sheet_plo_summary(
     for row in rows:
         values = [
             row.plo_code, row.category, row.description, row.course_count, row.clo_count,
-            row.total_students, row.student_count_with_data, row.average_achieved_percent,
-            row.achieved_student_count, row.achieved_rate_percent, row.achieved_rate_percent_with_data,
+            row.total_students, row.student_count_with_data, row.coverage_percent,
+            row.average_achieved_percent if row.average_achieved_percent is not None else "-",
+            row.achieved_student_count,
+            row.achieved_rate_percent if row.achieved_rate_percent is not None else "-",
             row.status,
         ]
         for col, value in enumerate(values, start=1):
@@ -155,22 +157,30 @@ def _build_sheet_plo_summary(
 
     footer_row = row_idx + 1
     ws.cell(row=footer_row, column=1, value="นักศึกษาที่บรรลุ PLO ครบทุกข้อ").font = BOLD_FONT
+    all_achieved_percent_display = (
+        f"{result.all_plo_achieved_percent}%" if result.all_plo_achieved_percent is not None else "-"
+    )
     ws.cell(
         row=footer_row, column=2,
-        value=f"{result.all_plo_achieved_count} คน ({result.all_plo_achieved_percent}%)",
+        value=(
+            f"{result.all_plo_achieved_count} คน ({all_achieved_percent_display}) "
+            f"จาก {result.all_plo_data_complete_count} คนที่มีข้อมูลครบทุก PLO"
+        ),
     ).font = BOLD_FONT
     note_cell = ws.cell(
         row=footer_row + 1, column=1,
         value=(
             f"หมายเหตุ: นับเฉพาะ {result.qualifying_plo_count} จาก {result.total_plo_count} ข้อที่มี "
-            "CLO ผูกอยู่จริง (PLO ที่ยังไม่มี CLO ผูกเป็นไปไม่ได้ที่จะบรรลุอยู่แล้วโดยดีไซน์)"
+            "CLO ผูกอยู่จริง (PLO ที่ยังไม่มี CLO ผูกเป็นไปไม่ได้ที่จะบรรลุอยู่แล้วโดยดีไซน์) ตัวหารคือ "
+            "นักศึกษาที่มีข้อมูลครบทุก PLO ที่นับ ไม่ใช่นักศึกษาทั้งหมด (คนที่ยังไม่มีข้อมูลของ PLO ข้อใด"
+            "ข้อหนึ่งยังตัดสินไม่ได้ว่าบรรลุครบจริงหรือไม่)"
         ),
     )
     note_cell.font = BASE_FONT
     note_cell.alignment = WRAP_ALIGNMENT
     ws.merge_cells(start_row=footer_row + 1, start_column=1, end_row=footer_row + 1, end_column=len(headers))
 
-    _autofit_columns(ws, [10, 16, 32, 14, 12, 14, 10, 16, 10, 18, 20, 16])
+    _autofit_columns(ws, [10, 16, 32, 14, 12, 14, 10, 18, 16, 10, 14, 16])
     _freeze_and_filter(ws, header_row=1, last_row=row_idx - 1, last_col=len(headers))
 
 
@@ -315,6 +325,7 @@ def _build_sheet_cohort_comparison(
         count = comparison.student_count_by_cohort.get(year, 0)
         headers.append(f"รุ่น {year} ({count} คน) - คะแนนเฉลี่ย (%)")
         headers.append(f"รุ่น {year} ({count} คน) - ร้อยละที่บรรลุ (%)")
+        headers.append(f"รุ่น {year} ({count} คน) - จำนวนผู้มีข้อมูล")
     _header_row(ws, 1, headers)
 
     row_idx = 2
@@ -327,16 +338,27 @@ def _build_sheet_cohort_comparison(
         col = 3
         for year in cohort_years:
             cell_data = row.per_cohort.get(year)
-            avg_cell = ws.cell(row=row_idx, column=col, value=cell_data.average_achieved_percent if cell_data else "-")
+            avg_value = (
+                cell_data.average_achieved_percent if cell_data and cell_data.average_achieved_percent is not None else "-"
+            )
+            avg_cell = ws.cell(row=row_idx, column=col, value=avg_value)
             avg_cell.font = BASE_FONT
             avg_cell.alignment = CENTER_ALIGNMENT
-            rate_cell = ws.cell(row=row_idx, column=col + 1, value=cell_data.achieved_rate_percent if cell_data else "-")
+            rate_value = (
+                cell_data.achieved_rate_percent if cell_data and cell_data.achieved_rate_percent is not None else "-"
+            )
+            rate_cell = ws.cell(row=row_idx, column=col + 1, value=rate_value)
             rate_cell.font = BASE_FONT
             rate_cell.alignment = CENTER_ALIGNMENT
-            col += 2
+            coverage_count_cell = ws.cell(
+                row=row_idx, column=col + 2, value=cell_data.student_count_with_data if cell_data else 0
+            )
+            coverage_count_cell.font = BASE_FONT
+            coverage_count_cell.alignment = CENTER_ALIGNMENT
+            col += 3
         row_idx += 1
 
-    widths = [10, 32] + [18, 18] * len(cohort_years)
+    widths = [10, 32] + [18, 18, 18] * len(cohort_years)
     _autofit_columns(ws, widths)
     _freeze_and_filter(ws, header_row=1, last_row=row_idx - 1, last_col=len(headers))
 
@@ -357,11 +379,12 @@ def _build_sheet_personal(wb: Workbook, db: Session, result: CurriculumPLOAchiev
         ws.cell(row=row_idx, column=3, value=row.cohort_year if row.cohort_year is not None else "-").font = BASE_FONT
 
         for offset, plo in enumerate(plos):
+            has_data = row.plo_has_data.get(plo.id, False)
             percent = row.plo_percents.get(plo.id, 0.0)
             cell = ws.cell(row=row_idx, column=4 + offset)
             cell.font = BASE_FONT
             cell.alignment = CENTER_ALIGNMENT
-            if percent <= 0:
+            if not has_data:
                 cell.value = "-"
             else:
                 cell.value = percent

@@ -9,9 +9,12 @@
             จริง (mastery/PLO_x/threshold) ยังอยู่ที่ app/services/plo_achievement_service.py เหมือนเดิม
             (ไม่แตะ) ที่นี่แค่เรียก compute_cohort_plo_achievement() (ผลลัพธ์เดียวกับ
             GET /plo/achievement/cohort) แล้วต่อยอดจัดรูปแบบ/ผูกกับ curriculum mapping
-            (course_plo/clo_plo_mapping/study_plan) สำหรับ export - หมายเหตุตัวหารสำคัญ : average/
-            achieved_rate หลักในสรุปการบรรลุ PLO หารด้วย**นักศึกษาทั้งหมด**เหมือน endpoint เดิมทุกประการ
-            (คนละพฤติกรรมกับ CLO report ที่หารด้วยผู้มีข้อมูล) ห้ามเปลี่ยน - ดู compute_plo_summary_rows
+            (course_plo/clo_plo_mapping/study_plan) สำหรับ export - หมายเหตุตัวหาร (TASK-plo-
+            denominator) : average/achieved_rate หลักในสรุปการบรรลุ PLO หารด้วย**นักศึกษาที่มีข้อมูล**
+            แล้ว (ตรงกับ compute_cohort_plo_achievement()/GET /plo/achievement/cohort เป๊ะ - เดิมหารด้วย
+            นักศึกษาทั้งหมดแล้วมีคอลัมน์เสริม "จากผู้มีข้อมูล" แยกต่างหาก แต่ตอนนี้ตัวหารหลักเปลี่ยนไปแล้ว
+            คอลัมน์เสริมนั้นถูกลบทิ้ง เหลือแค่ coverage_percent บอกสัดส่วนผู้มีข้อมูลจากทั้งหมดแทน) ดู
+            compute_plo_summary_rows
 
 ถ้าแก้ : ถ้าเพิ่ม field ใหม่ที่ต้องโชว์ในรายงาน ให้เพิ่มที่นี่แล้วให้ plo_report_export_service.py ดึงไปใช้
          ไม่ใช่คำนวณแทรกตรงจุดวาด cell เอง (กันข้อมูล/ตรรกะกระจายหลายที่) ห้ามแก้สูตร/เกณฑ์การคำนวณ PLO
@@ -76,14 +79,17 @@ def compute_explanation_rows(
         ),
         ExplanationRow(
             "เกณฑ์บรรลุระดับหลักสูตรที่ใช้ในรายงานนี้",
-            f"PLO ข้อหนึ่งถือว่า \"บรรลุระดับหลักสูตร\" เมื่อร้อยละของนักศึกษาที่บรรลุ (จากทั้งหมด) "
-            f"≥ {target_rate}%",
+            f"PLO ข้อหนึ่งถือว่า \"บรรลุระดับหลักสูตร\" เมื่อร้อยละของนักศึกษาที่บรรลุ (จากผู้มีข้อมูล "
+            f"เท่านั้น) ≥ {target_rate}%",
         ),
         ExplanationRow(
             "หมายเหตุตัวหารในชีต \"สรุปการบรรลุ PLO\"",
-            "คะแนนเฉลี่ยและร้อยละที่บรรลุคอลัมน์หลักหารด้วยนักศึกษาทั้งหมด (คนที่ไม่มีข้อมูลนับเป็น 0%) "
-            "เพื่อให้ตรงกับตัวเลขบนหน้าเว็บเป๊ะ ส่วนคอลัมน์ \"ร้อยละที่บรรลุ (จากผู้มีข้อมูล)\" คำนวณแยก "
-            "จากผู้ที่มีข้อมูลจริงเท่านั้น เป็นคอลัมน์เสริมให้เห็นภาพทั้งสองมุม",
+            "คะแนนเฉลี่ยและร้อยละที่บรรลุคอลัมน์หลักหารด้วย\"นักศึกษาที่มีข้อมูลของ PLO นั้น\" เท่านั้น "
+            "ไม่ใช่นักศึกษาทั้งหมด (นักศึกษาที่ยังไม่ได้เรียนวิชาที่วัด PLO นี้เป็นกรณี \"ยังไม่มีข้อมูล\" "
+            "ไม่ใช่ \"ไม่ผ่าน\" - ถ้าหารด้วยทั้งหมด PLO ของชั้นปีปลายจะดูเหมือนล้มเหลวทั้งที่ยังไม่ถึงเวลา"
+            "วัด) คอลัมน์ \"ความครอบคลุมข้อมูล (%)\" บอกสัดส่วนคนมีข้อมูลจากนักศึกษาทั้งหมด ให้ดูคู่กับ"
+            "ตัวเลขบรรลุเสมอ - ถ้าไม่มีใครมีข้อมูลของ PLO นั้นเลย คะแนนเฉลี่ย/ร้อยละที่บรรลุจะว่างไว้ "
+            "(หารไม่ได้ ไม่ใช่ 0%)",
         ),
     ]
     for name, description in sheet_names:
@@ -101,10 +107,10 @@ class PLOSummaryRow:
     clo_count: int
     total_students: int
     student_count_with_data: int
-    average_achieved_percent: float
+    average_achieved_percent: float | None  # None = ไม่มีใครมีข้อมูลเลย (หารไม่ได้ ไม่ใช่ 0%)
     achieved_student_count: int
-    achieved_rate_percent: float  # จากนักศึกษาทั้งหมด (ตรงกับหน้าเว็บ)
-    achieved_rate_percent_with_data: str  # จากผู้มีข้อมูลเท่านั้น - "-" ถ้าไม่มีใครมีข้อมูลเลย
+    achieved_rate_percent: float | None  # หารด้วย student_count_with_data (TASK-plo-denominator)
+    coverage_percent: float  # student_count_with_data / total_students × 100
     status: str  # บรรลุ / ไม่บรรลุ / ยังไม่มี CLO ผูก / ยังไม่มีข้อมูล
 
 
@@ -114,10 +120,10 @@ def compute_plo_summary_rows(
     result: CurriculumPLOAchievement,
     target_rate: Decimal,
 ) -> list[PLOSummaryRow]:
-    """หนึ่งแถวต่อ PLO - ตัวเลขหลัก (average_achieved_percent, achieved_rate_percent) มาจาก
-    compute_cohort_plo_achievement() ตรงๆ (หารด้วยนักศึกษาทั้งหมดเหมือน GET /plo/achievement/cohort
-    ทุกประการ - ห้ามเปลี่ยน) เพิ่มแค่คอลัมน์ course_count/clo_count (จาก clo_plo_mapping) และ
-    achieved_rate_percent_with_data (คอลัมน์เสริม) เข้าไป"""
+    """หนึ่งแถวต่อ PLO - ตัวเลขทั้งหมด (average_achieved_percent, achieved_rate_percent,
+    coverage_percent) มาจาก compute_cohort_plo_achievement() ตรงๆ (หารด้วยนักศึกษาที่มีข้อมูล เหมือน
+    GET /plo/achievement/cohort ทุกประการ - ห้ามคำนวณซ้ำเอง) เพิ่มแค่คอลัมน์ course_count/clo_count
+    (จาก clo_plo_mapping) เข้าไปเป็นข้อมูลเสริมของ curriculum mapping"""
     plo_clo_weights, plo_course_clo_ids, _thresholds = _build_plo_requirements(db, curriculum_id)
     qualifying_plo_ids = _qualifying_plo_ids(plo_clo_weights)
 
@@ -136,20 +142,10 @@ def compute_plo_summary_rows(
             status = "ยังไม่มี CLO ผูก"
         elif summary.student_count_with_data == 0:
             status = "ยังไม่มีข้อมูล"
-        elif summary.achieved_rate_percent >= float(target_rate):
+        elif summary.achieved_rate_percent is not None and summary.achieved_rate_percent >= float(target_rate):
             status = "บรรลุ"
         else:
             status = "ไม่บรรลุ"
-
-        if summary.student_count_with_data > 0:
-            rate_with_data = (
-                Decimal(summary.achieved_student_count)
-                / Decimal(summary.student_count_with_data)
-                * Decimal(100)
-            ).quantize(Decimal("0.1"))
-            rate_with_data_display = f"{rate_with_data}"
-        else:
-            rate_with_data_display = "-"
 
         rows.append(
             PLOSummaryRow(
@@ -164,7 +160,7 @@ def compute_plo_summary_rows(
                 average_achieved_percent=summary.average_achieved_percent,
                 achieved_student_count=summary.achieved_student_count,
                 achieved_rate_percent=summary.achieved_rate_percent,
-                achieved_rate_percent_with_data=rate_with_data_display,
+                coverage_percent=summary.coverage_percent,
                 status=status,
             )
         )
@@ -449,8 +445,9 @@ def compute_traceability_rows(
 
 @dataclass
 class CohortComparisonCell:
-    average_achieved_percent: float
-    achieved_rate_percent: float
+    average_achieved_percent: float | None
+    achieved_rate_percent: float | None
+    student_count_with_data: int
 
 
 @dataclass
@@ -495,6 +492,7 @@ def compute_cohort_comparison(
                 per_cohort[year] = CohortComparisonCell(
                     average_achieved_percent=summary.average_achieved_percent,
                     achieved_rate_percent=summary.achieved_rate_percent,
+                    student_count_with_data=summary.student_count_with_data,
                 )
         rows.append(CohortComparisonRow(plo_code=plo_code, description=description, per_cohort=per_cohort))
 
@@ -509,15 +507,18 @@ class PersonalRow:
     student_id: str
     student_name: str
     cohort_year: int | None
-    plo_percents: dict[int, float]  # plo_id -> achieved_percent (0.0 แสดงเป็น "-" ฝั่ง export - ดู
-    # หมายเหตุใน module docstring เรื่อง 0.0 หมายถึง "ไม่มีข้อมูล" ตามธรรมเนียมเดิมของระบบ)
+    plo_percents: dict[int, float]  # plo_id -> achieved_percent (มีความหมายเฉพาะตอน plo_has_data=True
+    # เท่านั้น - ดู plo_has_data ด้านล่าง คนที่ has_data=False แสดง "-" ฝั่ง export เสมอ ไม่ใช่ 0)
     plo_achieved: dict[int, bool]
+    plo_has_data: dict[int, bool]  # plo_id -> has_data (TASK-plo-denominator)
     achieved_count: int
 
 
 def compute_personal_rows(db: Session, result: CurriculumPLOAchievement) -> list[PersonalRow]:
     """ชีต "รายบุคคล" (admin เท่านั้น) - reshape จาก result.students ที่คำนวณไว้แล้ว (ไม่คำนวณซ้ำ) แค่
-    เติม cohort_year ที่ StudentPLOAchievement ไม่มีเก็บไว้ (query แยกเพิ่ม)"""
+    เติม cohort_year ที่ StudentPLOAchievement ไม่มีเก็บไว้ (query แยกเพิ่ม) plo_has_data ส่งต่อไปให้
+    export service ตัดสินใจแสดง "-" แทนตัวเลข 0 (TASK-plo-denominator - เดิมใช้ percent<=0 เดา ซึ่งเดา
+    ผิดกับนักศึกษาที่มีคะแนนจริงแต่ได้ 0%)"""
     student_ids = [s.student_id for s in result.students]
     cohort_by_student = {
         row[0]: row[1]
@@ -528,6 +529,7 @@ def compute_personal_rows(db: Session, result: CurriculumPLOAchievement) -> list
     for student in result.students:
         plo_percents = {item.plo_id: item.achieved_percent for item in student.plo_achievements}
         plo_achieved = {item.plo_id: item.is_achieved for item in student.plo_achievements}
+        plo_has_data = {item.plo_id: item.has_data for item in student.plo_achievements}
         rows.append(
             PersonalRow(
                 student_id=student.student_id,
@@ -535,6 +537,7 @@ def compute_personal_rows(db: Session, result: CurriculumPLOAchievement) -> list
                 cohort_year=cohort_by_student.get(student.student_id),
                 plo_percents=plo_percents,
                 plo_achieved=plo_achieved,
+                plo_has_data=plo_has_data,
                 achieved_count=sum(1 for achieved in plo_achieved.values() if achieved),
             )
         )

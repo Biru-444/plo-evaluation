@@ -10,6 +10,13 @@
 ที่ใช้ร่วมกับ export (PLOAchievementItem/StudentPLOAchievement/PLOCohortSummaryItem/
 CurriculumPLOAchievement) ย้ายไป app/schemas/plo_calculation.py แล้วเช่นกัน
 
+ตัวหารสถิติระดับรุ่น (TASK-plo-denominator, 2026-09) : average_achieved_percent/achieved_rate_percent
+ของทั้ง /achievement/cohort และ /achievement/by-year หารด้วย**นักศึกษาที่มีข้อมูลของ PLO นั้น**
+(has_data=True ใน PLOAchievementItem) ไม่ใช่นักศึกษาทั้งหมดอีกต่อไป - เป็น None เมื่อไม่มีใครมีข้อมูลเลย
+(หารไม่ได้ ไม่ใช่ 0%) coverage_percent (ใหม่) คือสัดส่วนคนมีข้อมูลจากทั้งหมด ต้องแสดงคู่กันเสมอฝั่ง
+frontend สูตร/เกณฑ์รายบุคคล (PLO_x, 60%) ไม่เปลี่ยน - รายละเอียดเต็มอยู่ที่ module docstring ของ
+plo_achievement_service.py
+
 เชื่อมกับ : - GET /plo/achievement ถูกเรียกจากหน้าผลบรรลุรายบุคคล (student-plo / PLOAchievement.jsx)
             - GET /plo/achievement/cohort ถูกเรียกจากหน้า "ภาพรวม PLO ทั้งหลักสูตร" (PLODashboard.jsx,
               route /dashboard) — เรียก compute_cohort_plo_achievement() ตรงๆ ไม่มีตรรกะคำนวณเองอีก
@@ -52,6 +59,7 @@ from app.services.plo_achievement_service import (
     _clo_mastery_for_student,
     _clo_mastery_for_students_batch,
     _clo_passed,
+    _compute_plo_rate_stats,
     _student_passed_course_for_plo,
     _aggregate_plo_percent_stats,
     compute_cohort_plo_achievement,
@@ -63,16 +71,19 @@ router = APIRouter(prefix="/plo", tags=["PLO Achievement"])
 
 # เหมือน PLOCohortSummaryItem (app/schemas/plo_calculation.py) แต่เพิ่ม is_expected_this_year (PLO นี้
 # ถูกคาดหวังในชั้นปีนี้หรือไม่ตาม ylo_plo_mapping) — ใช้ในสรุปผลบรรลุ PLO แยกตามชั้นปีเท่านั้น ไม่มีใคร
-# ใช้ร่วมนอกไฟล์นี้ จึงไม่ได้ย้ายไป schemas/plo_calculation.py ด้วย
+# ใช้ร่วมนอกไฟล์นี้ จึงไม่ได้ย้ายไป schemas/plo_calculation.py ด้วย - average/rate เป็น float | None และ
+# มี coverage_percent เหมือน PLOCohortSummaryItem (TASK-plo-denominator - หารด้วยนักศึกษาที่มีข้อมูล
+# ไม่ใช่ทั้งหมด ดู plo_achievement_service.py module docstring)
 class YearlyPLOSummaryItem(BaseModel):
     plo_id: int
     plo_code: str
     description: str
     is_expected_this_year: bool
     student_count_with_data: int
-    average_achieved_percent: float
+    average_achieved_percent: float | None
     achieved_student_count: int
-    achieved_rate_percent: float
+    achieved_rate_percent: float | None
+    coverage_percent: float = 0.0
 
 
 # ผลบรรลุ PLO ของชั้นปีเดียว (1 ใน 4 ปี) — รายการย่อยใน CurriculumYearProgress ด้านล่าง
@@ -348,9 +359,10 @@ def get_plo_achievement_by_year(
                             description=plo.description_th,
                             is_expected_this_year=plo.id in expected_plo_ids,
                             student_count_with_data=0,
-                            average_achieved_percent=0.0,
+                            average_achieved_percent=None,
                             achieved_student_count=0,
-                            achieved_rate_percent=0.0,
+                            achieved_rate_percent=None,
+                            coverage_percent=0.0,
                         )
                         for plo in plos
                     ],
@@ -383,11 +395,11 @@ def get_plo_achievement_by_year(
         for plo in plos:
             percent_sum = percent_sum_by_plo.get(plo.id, Decimal(0))
             achieved_count = achieved_count_by_plo.get(plo.id, 0)
+            count_with_data = count_with_data_by_plo.get(plo.id, 0)
 
-            average_achieved_percent = (percent_sum / Decimal(total_students)).quantize(Decimal("0.1"))
-            achieved_rate_percent = (
-                Decimal(achieved_count) / Decimal(total_students) * Decimal(100)
-            ).quantize(Decimal("0.1"))
+            average_achieved_percent, achieved_rate_percent, coverage_percent = _compute_plo_rate_stats(
+                percent_sum, achieved_count, count_with_data, total_students
+            )
 
             plo_summary.append(
                 YearlyPLOSummaryItem(
@@ -395,10 +407,11 @@ def get_plo_achievement_by_year(
                     plo_code=plo.code,
                     description=plo.description_th,
                     is_expected_this_year=plo.id in expected_plo_ids,
-                    student_count_with_data=count_with_data_by_plo.get(plo.id, 0),
-                    average_achieved_percent=float(average_achieved_percent),
+                    student_count_with_data=count_with_data,
+                    average_achieved_percent=average_achieved_percent,
                     achieved_student_count=achieved_count,
-                    achieved_rate_percent=float(achieved_rate_percent),
+                    achieved_rate_percent=achieved_rate_percent,
+                    coverage_percent=coverage_percent,
                 )
             )
 

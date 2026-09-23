@@ -322,8 +322,14 @@ class TestWeightedFormula:
         resp = client.get(f"/plo/achievement/cohort?curriculum_id={curriculum.id}")
         assert resp.status_code == 200
         plo_summary = next(p for p in resp.json()["plo_summary"] if p["plo_id"] == plo.id)
-        assert plo_summary["average_achieved_percent"] == 0.0
+        # TASK-plo-denominator: เดิม average_achieved_percent == 0.0 (หารด้วยนักศึกษาทั้งหมด รวมคนไม่มี
+        # ข้อมูลเป็น 0 ด้วย) ตอนนี้หารด้วยนักศึกษาที่มีข้อมูล (has_data=True) เท่านั้น - นักศึกษาคนเดียวใน
+        # เทสนี้ไม่มีคะแนน CLO เลยสักตัว (weight_total คำนวณได้ = 0) จึง has_data=False ทำให้
+        # student_count_with_data = 0 และ average เป็น None (หารไม่ได้ ไม่ใช่ 0%) - นี่คือพฤติกรรมที่
+        # ตั้งใจเปลี่ยน ไม่ใช่บั๊ก
+        assert plo_summary["average_achieved_percent"] is None
         assert plo_summary["achieved_student_count"] == 0
+        assert plo_summary["student_count_with_data"] == 0
 
     def test_achieved_threshold_boundary_60_percent(self, client, db_session, admin_user):
         """PLO_x = 60.0 พอดี (เท่ากับเกณฑ์) ต้องนับว่าบรรลุ (>=  ไม่ใช่ >)"""

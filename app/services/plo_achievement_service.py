@@ -15,7 +15,20 @@
      ผลรวมน้ำหนักของ CLO ทุกตัวที่ผูกกับ PLO ข้อหนึ่งๆ ไม่บังคับต้องเท่า 100 PLO ที่ไม่มี CLO ผูกอยู่
      เลย หรือมี CLO ผูกอยู่แต่นักศึกษาไม่มี mastery ของ CLO เหล่านั้นเลยสักตัว ได้ PLO_x = 0.0
   4. is_achieved = PLO_x >= PLO_ACHIEVEMENT_THRESHOLD_PERCENT (ค่าคงที่เดียวทั้งระบบ ไม่มี threshold
-     แยกต่อ PLO) achieved_percent คือค่า PLO_x ตรงๆ (ต่อเนื่อง 0-100 จริง)
+     แยกต่อ PLO) achieved_percent คือค่า PLO_x ตรงๆ (ต่อเนื่อง 0-100 จริง) - สูตร/เกณฑ์รายบุคคลนี้ไม่
+     เปลี่ยนจาก TASK-plo-denominator เลย
+
+ตัวหารสถิติระดับรุ่น/หลักสูตร (TASK-plo-denominator, 2026-09) :
+  ระบบประเมินรายชั้นปี นักศึกษาที่ยังไม่ได้เรียนวิชาที่วัด PLO ข้อหนึ่งเป็นกรณี "ยังไม่มีข้อมูล" ไม่ใช่
+  "ไม่ผ่าน" - สถิติระดับรุ่น (average_achieved_percent, achieved_rate_percent, all_plo_achieved_percent)
+  จึงหารด้วย**นักศึกษาที่มีข้อมูลของ PLO นั้น** (has_data=True) ไม่ใช่นักศึกษาทั้งหมด ให้ตรงกับหลักการ
+  เดียวกับ clo_achievement_service.py ที่หารด้วย passed+failed อยู่แล้ว ไม่หารด้วยทุกคนที่ลงทะเบียน
+  has_data ของนักศึกษา 1 คนต่อ PLO 1 ข้อ = True เมื่อมี CLO ที่ผูกกับ PLO นั้นอย่างน้อย 1 ตัวที่คนนั้นมี
+  mastery จริง (Σweight ของ CLO ที่นับได้ > 0 ใน _student_plo_score) - นักศึกษาที่มีคะแนนจริงแต่ได้ 0%
+  ยังนับว่า has_data=True (มีหลักฐาน แค่คะแนนต่ำ) ต่างจากคนที่ยังไม่มีคะแนน CLO นั้นเลยสักตัว
+  (has_data=False) ตัวเลข coverage_percent (สัดส่วนคนมีข้อมูลจากทั้งหมด) ต้องคู่กับ average/rate เสมอ
+  ให้ผู้อ่านรู้ว่าตัวเลขมาจากกี่คน - ถ้า count_with_data=0 average/rate เป็น None (หารไม่ได้ ไม่ใช่ 0)
+  สูตรรายบุคคล (PLO_x) และเกณฑ์บรรลุ 60% ไม่เปลี่ยนเลย มีแค่ตัวหารตอนสรุปเป็นระดับรุ่นเท่านั้นที่เปลี่ยน
 
 เชื่อมกับ : - อ่าน/เขียนผ่านตาราง clo_plo_mapping, course, clo, item_clo, assessment_item,
               student_score (course_plo ไม่ได้ใช้คำนวณตรงนี้ — ใช้แสดง Curriculum Mapping เท่านั้น)
@@ -168,20 +181,27 @@ def _student_passed_course_for_plo(
     return all(_clo_passed(clo_id, clo_mastery, clo_pass_thresholds) for clo_id in course_clo_ids)
 
 
-def _student_plo_score(clo_weights: dict[int, Decimal], clo_mastery: dict[int, Decimal]) -> Decimal:
+def _student_plo_score(
+    clo_weights: dict[int, Decimal], clo_mastery: dict[int, Decimal]
+) -> tuple[Decimal, bool]:
     """
     ทำอะไร : PLO_x ของนักศึกษา 1 คน = Σ(mastery_i × weight_i) / Σ(weight_i) - สูตรหลัก (ดู module
              docstring) clo_weights คือ {clo_id: weight_percent} ของ PLO ข้อเดียว (จาก
              plo_clo_weights[plo_id] ที่ _build_plo_requirements สร้างไว้) - CLO ที่นักศึกษาไม่มี
              mastery เลย (ไม่เคยมีคะแนนบันทึกไว้สักชิ้นงาน) ถูกข้ามไปทั้งตัวตั้งและตัวหาร ไม่นับเป็น 0
+             คืนค่าเป็นคู่ (score, has_data) - has_data = weight_total > 0 (TASK-plo-denominator) บอกว่า
+             ตัวเลข score นี้มีหลักฐานจริงหรือเป็นแค่ 0.0 เพราะยังไม่มีข้อมูลให้คำนวณเลย
 
     เชื่อมกับ : ถูกเรียกโดย _calculate_plo_achievement_from_mastery ทีละ PLO - ผลลัพธ์นี้คือค่า
-                achieved_percent ที่แสดงบนหน้าภาพรวม PLO / ผลบรรลุรายบุคคล / export รายงาน PLO ทุกจุด
+                achieved_percent/has_data ที่แสดงบนหน้าภาพรวม PLO / ผลบรรลุรายบุคคล / export รายงาน PLO
+                ทุกจุด
 
-    ถ้าแก้ : เป็นจุดตัดสินใจหลักของทั้งระบบ แก้ตรงนี้กระทบ achieved_percent/is_achieved ทุกที่ - ผลรวม
-             น้ำหนัก (weight_total) เป็น 0 ได้ 2 กรณี: (1) PLO นี้ไม่มี CLO ผูกอยู่เลย (clo_weights ว่าง)
-             (2) มี CLO ผูกอยู่แต่นักศึกษาไม่มี mastery ของ CLO เหล่านั้นเลยสักตัว - ทั้งสองกรณีคืน 0.0
-             เหมือนกัน (ไม่มีหลักฐานให้คำนวณ ไม่ใช่บรรลุอัตโนมัติ)
+    ถ้าแก้ : เป็นจุดตัดสินใจหลักของทั้งระบบ แก้ตรงนี้กระทบ achieved_percent/is_achieved/has_data ทุกที่ -
+             ผลรวมน้ำหนัก (weight_total) เป็น 0 ได้ 2 กรณี: (1) PLO นี้ไม่มี CLO ผูกอยู่เลย (clo_weights
+             ว่าง) (2) มี CLO ผูกอยู่แต่นักศึกษาไม่มี mastery ของ CLO เหล่านั้นเลยสักตัว - ทั้งสองกรณีคืน
+             (0.0, False) เหมือนกัน (ไม่มีหลักฐานให้คำนวณ ไม่ใช่บรรลุอัตโนมัติ) นักศึกษาที่มี mastery
+             จริงแต่ได้คะแนนต่ำ (เช่น 0%) ยังคืน has_data=True เสมอ (weight_total > 0) - อย่าสับสนกับ
+             achieved_percent == 0.0 ซึ่งเกิดได้ทั้งสองกรณี ต้องเช็ค has_data แยกต่างหากเท่านั้น
     """
     weighted_sum = Decimal(0)
     weight_total = Decimal(0)
@@ -192,8 +212,8 @@ def _student_plo_score(clo_weights: dict[int, Decimal], clo_mastery: dict[int, D
         weighted_sum += mastery * weight
         weight_total += weight
     if weight_total == 0:
-        return Decimal("0.0")
-    return (weighted_sum / weight_total).quantize(Decimal("0.1"))
+        return Decimal("0.0"), False
+    return (weighted_sum / weight_total).quantize(Decimal("0.1")), True
 
 
 def _clo_mastery_for_student(
@@ -367,7 +387,7 @@ def _calculate_plo_achievement_from_mastery(
     """
     achievements = []
     for plo in plos:
-        score = _student_plo_score(plo_clo_weights.get(plo.id, {}), clo_mastery)
+        score, has_data = _student_plo_score(plo_clo_weights.get(plo.id, {}), clo_mastery)
         achievements.append(
             PLOAchievementItem(
                 plo_id=plo.id,
@@ -375,6 +395,7 @@ def _calculate_plo_achievement_from_mastery(
                 description=plo.description_th,
                 achieved_percent=float(score),
                 is_achieved=score >= PLO_ACHIEVEMENT_THRESHOLD_PERCENT,
+                has_data=has_data,
             )
         )
 
@@ -416,33 +437,68 @@ def _aggregate_plo_percent_stats(
     student_achievements: list[StudentPLOAchievement],
 ) -> tuple[dict[int, Decimal], dict[int, int], dict[int, int]]:
     """
-    ทำอะไร : รวมยอด achieved_percent และนับจำนวนนักศึกษาที่มีข้อมูล / ที่บรรลุ แยกตาม PLO แต่ละข้อ
-             (ใช้คิดค่าเฉลี่ยและอัตราการบรรลุของทั้งรุ่น)
+    ทำอะไร : รวมยอด achieved_percent (เฉพาะคนที่ has_data=True) และนับจำนวนนักศึกษาที่มีข้อมูล / ที่บรรลุ
+             แยกตาม PLO แต่ละข้อ (ใช้คิดค่าเฉลี่ยและอัตราการบรรลุของทั้งรุ่น - ดู _compute_plo_rate_stats
+             ที่ใช้ผลลัพธ์นี้หารด้วย count_with_data แทนจำนวนนักศึกษาทั้งหมด)
 
     เชื่อมกับ : ใช้ร่วมกันโดย compute_cohort_plo_achievement และ GET /achievement/by-year เพื่อให้
                 ตรรกะหาค่าเฉลี่ยระดับรุ่น (cohort-level averaging) อยู่ที่เดียวไม่ซ้ำโค้ด
 
-    ถ้าแก้ : ถ้าแก้เงื่อนไขการนับตรงนี้ จะกระทบทั้ง average_achieved_percent และ
-             achieved_rate_percent ที่แสดงในหน้าภาพรวม PLO และ YLO ตามชั้นปีพร้อมกัน
+    ถ้าแก้ : ถ้าแก้เงื่อนไขการนับตรงนี้ จะกระทบทั้ง average_achieved_percent, achieved_rate_percent
+             และ coverage_percent ที่แสดงในหน้าภาพรวม PLO และ YLO ตามชั้นปีพร้อมกัน
     """
     percent_sum_by_plo: dict[int, Decimal] = {}
-    # achieved_percent เป็นค่าต่อเนื่องแล้ว - count_with_data_by_plo นี้จึงหมายถึง "ได้คะแนนถ่วงน้ำหนัก
-    # > 0 จริง" ไม่ใช่ "มีข้อมูลบันทึกไว้" เป๊ะๆ (นักศึกษาที่ได้ 0% ทุกชิ้นงานจะไม่ถูกนับทั้งที่มีข้อมูลจริง)
-    # - ปล่อยไว้แบบนี้ต่อเพราะไม่มีจุดไหนใน frontend อ่าน student_count_with_data ตรงๆ ไปทำอย่างอื่น
+    # count_with_data_by_plo นับจาก has_data ตรงๆ (TASK-plo-denominator - เดิมนับจาก achieved_percent
+    # > 0 ซึ่งผิด: นักศึกษาที่มีคะแนนจริงแต่ได้ 0% เคยถูกนับว่า "ไม่มีข้อมูล" ทั้งที่มีหลักฐานจริง) -
+    # percent_sum ก็รวมเฉพาะคนที่ has_data=True เท่านั้นด้วยเหตุผลเดียวกัน (แม้ผลรวมจะเท่าเดิมในทางคณิต-
+    # ศาสตร์เพราะคนไม่มีข้อมูลได้ achieved_percent=0.0 เสมออยู่แล้ว แต่กรองไว้ตรงๆ ให้อ่านโค้ดเข้าใจง่าย
+    # กว่าไม่ต้องพึ่ง invariant นั้น) - ใช้จริงจากหลายจุดแล้ว: average/rate ระดับรุ่น, export รายงาน PLO
     count_with_data_by_plo: dict[int, int] = {}
     achieved_count_by_plo: dict[int, int] = {}
 
     for achievement in student_achievements:
         for item in achievement.plo_achievements:
-            percent_sum_by_plo[item.plo_id] = (
-                percent_sum_by_plo.get(item.plo_id, Decimal(0)) + Decimal(str(item.achieved_percent))
-            )
-            if item.achieved_percent > 0:
+            if item.has_data:
+                percent_sum_by_plo[item.plo_id] = (
+                    percent_sum_by_plo.get(item.plo_id, Decimal(0)) + Decimal(str(item.achieved_percent))
+                )
                 count_with_data_by_plo[item.plo_id] = count_with_data_by_plo.get(item.plo_id, 0) + 1
             if item.is_achieved:
                 achieved_count_by_plo[item.plo_id] = achieved_count_by_plo.get(item.plo_id, 0) + 1
 
     return percent_sum_by_plo, count_with_data_by_plo, achieved_count_by_plo
+
+
+def _compute_plo_rate_stats(
+    percent_sum: Decimal, achieved_count: int, count_with_data: int, total_students: int
+) -> tuple[float | None, float | None, float]:
+    """
+    ทำอะไร : คำนวณ (average_achieved_percent, achieved_rate_percent, coverage_percent) ของ PLO ข้อ
+             เดียวระดับรุ่น - average/rate หารด้วย count_with_data (นักศึกษาที่มีข้อมูล) ไม่ใช่
+             total_students (TASK-plo-denominator) coverage_percent หารด้วย total_students เสมอ (บอก
+             สัดส่วนคนมีข้อมูลจากทั้งหมด ไม่ใช่ตัวหารของ average/rate)
+
+    เชื่อมกับ : ใช้ helper ตัวเดียวนี้ทุกจุดที่ต้องสรุประดับรุ่น (compute_cohort_plo_achievement,
+                GET /achievement/by-year) เพื่อไม่ให้สูตร/พฤติกรรม edge case (หารด้วยศูนย์) เพี้ยนไปคนละ
+                ทางระหว่างสองจุด
+
+    ถ้าแก้ : count_with_data = 0 -> (None, None, coverage) เสมอ (หารไม่ได้ ไม่ใช่ 0 - ผู้เรียกต้องแสดง
+             "ยังไม่มีข้อมูล" ไม่ใช่ 0%) total_students = 0 -> coverage = 0.0 (กันหารศูนย์ แม้ในทาง
+             ปฏิบัติ caller จะเช็ค total_students == 0 แยกไว้ก่อนแล้วในกรณีไม่มีนักศึกษาเลย)
+    """
+    coverage_percent = (
+        float((Decimal(count_with_data) / Decimal(total_students) * Decimal(100)).quantize(Decimal("0.1")))
+        if total_students > 0
+        else 0.0
+    )
+    if count_with_data == 0:
+        return None, None, coverage_percent
+
+    average = float((percent_sum / Decimal(count_with_data)).quantize(Decimal("0.1")))
+    rate = float(
+        (Decimal(achieved_count) / Decimal(count_with_data) * Decimal(100)).quantize(Decimal("0.1"))
+    )
+    return average, rate, coverage_percent
 
 
 def _count_all_qualifying_plo_achieved(
@@ -472,20 +528,49 @@ def _count_all_qualifying_plo_achieved(
     return count
 
 
+def _count_students_with_complete_data(
+    student_achievements: list[StudentPLOAchievement], qualifying_plo_ids: set[int]
+) -> int:
+    """
+    ทำอะไร : นับจำนวนนักศึกษาที่มีข้อมูล (has_data=True) ครบทุก qualifying PLO - คือตัวหานใหม่ของ
+             all_plo_achieved_percent (TASK-plo-denominator - เดิมหารด้วยนักศึกษาทั้งหมด) คนที่ยังไม่มี
+             ข้อมูลของ PLO ข้อใดข้อหนึ่งเลย ไม่ควรถูกนับเป็นตัวหารของ "บรรลุครบทุกข้อ" เพราะยังตัดสินไม่ได้
+             ว่าครบจริงหรือแค่ยังไม่ถึงเวลาวัด
+
+    เชื่อมกับ : ใช้คำนวณ all_plo_data_complete_count คู่กับ all_plo_achieved_count ใน
+                compute_cohort_plo_achievement (สถิติวงแหวนหน้า "ภาพรวม PLO")
+
+    ถ้าแก้ : 0 qualifying PLO = ไม่มีใครนับเป็น "มีข้อมูลครบ" ได้ (เหมือน _count_all_qualifying_plo_achieved
+             ด้านบน) - all_plo_achieved_percent ต้องเป็น None ถ้าค่าที่ฟังก์ชันนี้คืนเป็น 0
+    """
+    if not qualifying_plo_ids:
+        return 0
+    count = 0
+    for achievement in student_achievements:
+        has_data_by_plo = {item.plo_id: item.has_data for item in achievement.plo_achievements}
+        if all(has_data_by_plo.get(plo_id, False) for plo_id in qualifying_plo_ids):
+            count += 1
+    return count
+
+
 def compute_cohort_plo_achievement(
     db: Session, curriculum_id: int, cohort_year: int | None = None
 ) -> CurriculumPLOAchievement | None:
     """
-    ทำอะไร : คำนวณสรุปผลบรรลุ PLO ทุกข้อของทั้งหลักสูตร (ค่าเฉลี่ย, อัตราบรรลุ) พร้อมรายชื่อนักศึกษา
-             ทุกคนและผลบรรลุ PLO รายข้อของแต่ละคน กรองตามรุ่น (cohort_year) ได้ ถ้าไม่ใส่จะรวมทุกรุ่น -
-             ย้ายมาจาก app/routes/plo_calculation.py::get_cohort_plo_achievement เดิมตรงๆ (ตรรกะ/
-             ค่าที่คืนเหมือนเดิมทุกประการ) เพื่อให้ endpoint เดิมและ export รายงาน PLO
-             (plo_report_export_service.py) เรียกตัวเดียวกัน คืน None ถ้าไม่พบ curriculum_id (ผู้เรียก
-             เป็นคนตัดสินใจว่าจะแปลงเป็น HTTPException 404 หรือพฤติกรรมอื่น)
+    ทำอะไร : คำนวณสรุปผลบรรลุ PLO ทุกข้อของทั้งหลักสูตร (ค่าเฉลี่ย, อัตราบรรลุ - หารด้วยนักศึกษาที่มี
+             ข้อมูลของ PLO นั้น ไม่ใช่นักศึกษาทั้งหมด ดู module docstring เรื่องตัวหารใหม่) พร้อมรายชื่อ
+             นักศึกษาทุกคนและผลบรรลุ PLO รายข้อของแต่ละคน กรองตามรุ่น (cohort_year) ได้ ถ้าไม่ใส่จะรวม
+             ทุกรุ่น - ย้ายมาจาก app/routes/plo_calculation.py::get_cohort_plo_achievement เดิม (สูตร
+             รายบุคคลเหมือนเดิมทุกประการ ตัวหารสรุประดับรุ่นเปลี่ยนตาม TASK-plo-denominator) เพื่อให้
+             endpoint เดิมและ export รายงาน PLO (plo_report_export_service.py) เรียกตัวเดียวกัน คืน
+             None ถ้าไม่พบ curriculum_id (ผู้เรียกเป็นคนตัดสินใจว่าจะแปลงเป็น HTTPException 404 หรือ
+             พฤติกรรมอื่น)
 
     เชื่อมกับ : ใช้ _build_plo_requirements + _qualifying_plo_ids (คำนวณครั้งเดียวต่อ request) แล้ว
                 ดึง CLO mastery ของนักศึกษาทั้ง roster แบบ batch ผ่าน _clo_mastery_for_students_batch
-                ก่อนวนคำนวณผลบรรลุทีละคนด้วย _calculate_plo_achievement_from_mastery — เรียกโดย
+                ก่อนวนคำนวณผลบรรลุทีละคนด้วย _calculate_plo_achievement_from_mastery แล้วสรุปด้วย
+                _compute_plo_rate_stats (average/rate/coverage ต่อ PLO) และ
+                _count_students_with_complete_data (ตัวหารของ all_plo_achieved_percent) — เรียกโดย
                 GET /plo/achievement/cohort (หน้า "ภาพรวม PLO") และ GET /plo/achievement/export
 
     ถ้าแก้ : ห้ามเปลี่ยนกลับไปคำนวณ mastery ทีละคนในลูป (ดู docstring ของ _clo_mastery_for_students_batch
@@ -533,14 +618,16 @@ def compute_cohort_plo_achievement(
                     plo_code=plo.code,
                     description=plo.description_th,
                     student_count_with_data=0,
-                    average_achieved_percent=0.0,
+                    average_achieved_percent=None,
                     achieved_student_count=0,
-                    achieved_rate_percent=0.0,
+                    achieved_rate_percent=None,
+                    coverage_percent=0.0,
                 )
                 for plo in plos
             ],
             students=[],
             available_cohort_years=available_cohort_years,
+            all_plo_achieved_percent=None,
             qualifying_plo_count=len(qualifying_plo_ids),
             total_plo_count=len(plos),
         )
@@ -572,28 +659,37 @@ def compute_cohort_plo_achievement(
     for plo in plos:
         percent_sum = percent_sum_by_plo.get(plo.id, Decimal(0))
         achieved_count = achieved_count_by_plo.get(plo.id, 0)
+        count_with_data = count_with_data_by_plo.get(plo.id, 0)
 
-        average_achieved_percent = (percent_sum / Decimal(total_students)).quantize(Decimal("0.1"))
-        achieved_rate_percent = (
-            Decimal(achieved_count) / Decimal(total_students) * Decimal(100)
-        ).quantize(Decimal("0.1"))
+        average_achieved_percent, achieved_rate_percent, coverage_percent = _compute_plo_rate_stats(
+            percent_sum, achieved_count, count_with_data, total_students
+        )
 
         plo_summary.append(
             PLOCohortSummaryItem(
                 plo_id=plo.id,
                 plo_code=plo.code,
                 description=plo.description_th,
-                student_count_with_data=count_with_data_by_plo.get(plo.id, 0),
-                average_achieved_percent=float(average_achieved_percent),
+                student_count_with_data=count_with_data,
+                average_achieved_percent=average_achieved_percent,
                 achieved_student_count=achieved_count,
-                achieved_rate_percent=float(achieved_rate_percent),
+                achieved_rate_percent=achieved_rate_percent,
+                coverage_percent=coverage_percent,
             )
         )
 
     all_plo_achieved_count = _count_all_qualifying_plo_achieved(student_achievements, qualifying_plo_ids)
+    all_plo_data_complete_count = _count_students_with_complete_data(
+        student_achievements, qualifying_plo_ids
+    )
     all_plo_achieved_percent = (
-        Decimal(all_plo_achieved_count) / Decimal(total_students) * Decimal(100)
-    ).quantize(Decimal("0.1"))
+        float(
+            (Decimal(all_plo_achieved_count) / Decimal(all_plo_data_complete_count) * Decimal(100))
+            .quantize(Decimal("0.1"))
+        )
+        if all_plo_data_complete_count > 0
+        else None
+    )
 
     return CurriculumPLOAchievement(
         curriculum_id=curriculum.id,
@@ -603,7 +699,8 @@ def compute_cohort_plo_achievement(
         students=students_sorted,
         available_cohort_years=available_cohort_years,
         all_plo_achieved_count=all_plo_achieved_count,
-        all_plo_achieved_percent=float(all_plo_achieved_percent),
+        all_plo_achieved_percent=all_plo_achieved_percent,
+        all_plo_data_complete_count=all_plo_data_complete_count,
         qualifying_plo_count=len(qualifying_plo_ids),
         total_plo_count=len(plos),
     )

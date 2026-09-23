@@ -267,9 +267,11 @@ class TestSheet2MatchesCohortEndpoint:
         wb = load_workbook(BytesIO(export_resp.content))
         row = _plo_summary_row_by_code(wb, "PLO1")
 
-        assert row[7] == api_summary["average_achieved_percent"]  # คะแนน PLO เฉลี่ย (%)
-        assert row[8] == api_summary["achieved_student_count"]  # บรรลุ (คน)
-        assert row[9] == api_summary["achieved_rate_percent"]  # ร้อยละที่บรรลุ (จากทั้งหมด)
+        # TASK-plo-denominator: เพิ่มคอลัมน์ "ความครอบคลุมข้อมูล (%)" เป็นคอลัมน์ที่ 8 (index 7) ทำให้
+        # คอลัมน์ที่เหลือขยับไปคนละ 1 ตำแหน่งจากเดิม (คะแนนเฉลี่ย 7->8, บรรลุ(คน) 8->9, ร้อยละที่บรรลุ 9->10)
+        assert row[8] == api_summary["average_achieved_percent"]  # คะแนน PLO เฉลี่ย (%)
+        assert row[9] == api_summary["achieved_student_count"]  # บรรลุ (คน)
+        assert row[10] == api_summary["achieved_rate_percent"]  # ร้อยละที่บรรลุ (หารด้วยผู้มีข้อมูล)
 
         all_achieved_row = _sheet_rows(wb, "สรุปการบรรลุ PLO")[-2]
         assert (
@@ -303,12 +305,17 @@ class TestSheet2MatchesCohortEndpoint:
         wb = load_workbook(BytesIO(export_resp.content))
         row = _plo_summary_row_by_code(wb, "PLO1")
         assert row[5] == 1  # นักศึกษาทั้งหมด - เฉพาะรุ่น 69
-        assert row[7] == api_summary["average_achieved_percent"]
-        assert row[8] == api_summary["achieved_student_count"]
-        assert row[9] == api_summary["achieved_rate_percent"]
+        # TASK-plo-denominator: คอลัมน์ขยับ 7->8/8->9/9->10 เหมือนเทสข้างบน (เพิ่มคอลัมน์ coverage)
+        assert row[8] == api_summary["average_achieved_percent"]
+        assert row[9] == api_summary["achieved_student_count"]
+        assert row[10] == api_summary["achieved_rate_percent"]
 
 
-class TestAchievedRateWithDataColumn:
+class TestDenominatorAndCoverage:
+    """TASK-plo-denominator: average/rate หลักหารด้วยนักศึกษาที่มีข้อมูล (ไม่ใช่ทั้งหมด) แล้ว - เทสนี้
+    เดิมชื่อ TestAchievedRateWithDataColumn ทดสอบคอลัมน์เสริม "ร้อยละที่บรรลุ (จากผู้มีข้อมูล)" ที่ถูกลบ
+    ทิ้งไปแล้ว (ตัวหารหลักเปลี่ยนไปใช้ค่าเดียวกันนั้นแทน) เขียนใหม่ให้ตรงพฤติกรรมปัจจุบัน"""
+
     def test_computed_correctly_when_some_students_have_no_data(self, client, db_session, admin_user):
         curriculum = _make_curriculum(db_session)
         plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ", category="ความรู้")
@@ -333,10 +340,14 @@ class TestAchievedRateWithDataColumn:
 
         assert row[5] == 3  # นักศึกษาทั้งหมด
         assert row[6] == 2  # มีข้อมูล
-        # บรรลุ 1 คน (s1) จาก 2 คนที่มีข้อมูล -> 50.0
-        assert row[10] == "50.0"  # ร้อยละที่บรรลุ (จากผู้มีข้อมูล)
-        # บรรลุ 1 คน จาก 3 คนทั้งหมด -> 33.3
-        assert row[9] == pytest.approx(33.3, abs=0.1)
+        # ความครอบคลุมข้อมูล = 2/3*100 = 66.7 (คอลัมน์ใหม่ index 7)
+        assert row[7] == pytest.approx(66.7, abs=0.1)
+        # ค่าเฉลี่ยหลัก (index 8) หารด้วยผู้มีข้อมูล 2 คนเท่านั้น: (90+20)/2 = 55.0
+        assert row[8] == pytest.approx(55.0, abs=0.1)
+        # ร้อยละที่บรรลุหลัก (index 10) หารด้วยผู้มีข้อมูล 2 คน ไม่ใช่ทั้งหมด 3 คน: บรรลุ 1 คน (s1) จาก
+        # 2 คนที่มีข้อมูล -> 50.0 (เดิมก่อน TASK-plo-denominator ค่านี้จะเป็น 33.3 เพราะหารด้วย 3 คน
+        # ทั้งหมด - นี่คือการเปลี่ยนแปลงหลักของ task นี้)
+        assert row[10] == pytest.approx(50.0, abs=0.1)
 
 
 class TestStatusChangesWithTargetRate:
