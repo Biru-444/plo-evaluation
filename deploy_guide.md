@@ -35,3 +35,22 @@ Postgres instance ชื่อ `plo-db` (Free plan, Singapore, PostgreSQL 18, qu
 - **ขนาด (เช็ค 2026-09-19)**: `plo_db_test` ~8.2 MB เทียบกับ `plo_db` ~11 MB และ quota รวม 1 GB ของ
   instance (รวมทุกฐานบน instance นี้ใช้ไปแค่ ~41 MB หรือ ~4% ของ quota) — เล็กพอที่จะเก็บไว้ถาวรได้โดย
   ไม่ต้องกังวลเรื่อง quota
+
+## ⚠️ Deploy checklist — รัน migration ค้างก่อน/พร้อมกับทุก deploy ที่เพิ่ม script ใหม่
+
+พบบั๊กจริง (2026-09-23) ที่ production พังเพราะ `scripts/migrate_add_clo_plo_mapping_weight.py` ถูก merge
+เข้า model แล้ว แต่ไม่เคยถูกรันบน `plo-db` จริง — `clo_plo_mapping.weight_percent` เลยไม่มีอยู่จริงบน
+production ทำให้ endpoint ที่ SELECT คอลัมน์นี้ 500 ทุกครั้ง (`/plo/achievement/cohort`,
+`/plo/achievement/by-year` และอื่นๆ) กว่าจะรู้ก็ตอนมีคนใช้งานจริงเจอ error
+
+**ทุกครั้งที่ deploy ที่มี `scripts/migrate_*.py` ใหม่ (หรือ merge PR ที่มี):**
+
+1. รัน migration script ใหม่นั้นบน production ก่อนหรือพร้อมกับ deploy โค้ดที่พึ่งพา schema ใหม่นั้น —
+   `DATABASE_URL="<production URL>" ./venv/Scripts/python.exe scripts/migrate_xxx.py`
+2. เช็คว่า schema ตรงกับโมเดลจริงหลังรัน —
+   `DATABASE_URL="<production URL>" ./venv/Scripts/python.exe scripts/check_schema.py`
+   (exit code ไม่เป็นศูนย์ = ยังมี gap ค้างอยู่ ห้าม deploy โค้ดที่พึ่งพา schema นั้นจนกว่าจะแก้)
+3. ตัว `check_schema()` เดียวกันนี้ยังถูกเรียกอัตโนมัติตอนแอป startup ด้วย (ดู `app/main.py`) — ถ้ามี gap
+   จะ log เป็น ERROR ใน Render logs ทันที (ไม่ crash แอป) เป็นตาข่ายรองรับชั้นสุดท้ายเผื่อลืมทำขั้นตอน 1-2
+   ข้างบน แต่ **อย่าพึ่งพาตาข่ายนี้อย่างเดียว** — ควรรัน migration ก่อน deploy เสมอ เพราะระหว่างที่ยังไม่ได้
+   รัน endpoint ที่พึ่งพา schema นั้นจะ 500 ไปเรื่อยๆ จนกว่าจะรันจริง

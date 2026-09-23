@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.database import Base, engine
+from app.schema_check import check_schema
 from app.routes import (
     assessment,
     auth,
@@ -55,6 +56,13 @@ app = FastAPI(
 )
 
 logger = logging.getLogger("app")
+
+# เช็ค schema จริงเทียบกับ SQLAlchemy models ตอน startup (ดู app/schema_check.py) - ถ้ามี migration
+# ค้างไม่ได้รัน (เช่น deploy โค้ดที่เพิ่ม column ใหม่แต่ลืมรัน scripts/migrate_*.py บน production) จะ log
+# ERROR ดังๆ ตรงนี้แทนที่จะปล่อยให้ไปโผล่เป็น 500 ที่วินิจฉัยยากตอน endpoint ถูกเรียกจริง - ไม่ crash แอป
+# เพราะ endpoint อื่นที่ไม่พึ่ง schema ที่หายไปยังควรใช้งานได้ปกติต่อไป
+for _gap in check_schema(engine):
+    logger.error("Schema mismatch ตอน startup: %s", _gap)
 
 
 class _CatchUnhandledExceptionsMiddleware(BaseHTTPMiddleware):
