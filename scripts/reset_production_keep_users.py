@@ -160,11 +160,47 @@ def _dry_run() -> None:
         conn.execute(text("ROLLBACK"))
 
 
+def _print_counts(conn, label: str) -> None:
+    print(f"จำนวนแถว{label}:")
+    total = 0
+    for table in AFFECTED_TABLES_IN_CASCADE_ORDER:
+        count = _table_count(conn, table)
+        total += count
+        print(f"   {table}: {count}")
+    print(f"   รวม: {total} แถว")
+    role_counts = conn.execute(
+        text('SELECT role, count(*) FROM "user" GROUP BY role ORDER BY role')
+    ).all()
+    print("   user by role:", ", ".join(f"{r}={c}" for r, c in role_counts) or "(ไม่มี)")
+
+
 def _apply() -> None:
-    raise RuntimeError(
-        "Phase A เท่านั้น - ฟังก์ชันนี้ยังไม่ implement ตั้งใจ ต้องได้รับอนุมัติ Phase B แยกต่างหากก่อน "
-        "ถึงจะเขียนโค้ดลบจริงส่วนนี้"
-    )
+    with engine.begin() as conn:
+        # เช็ค blocker ซ้ำอีกครั้งในทรานแซกชันเดียวกับที่จะลบจริง (ไม่ใช้ผลจาก dry-run รอบก่อนหน้า ซึ่ง
+        # อาจรันคนละครั้ง/คนละเวลากัน) - เจอ blocker ใหม่ที่ไม่รู้จัก ยกเลิกทันที ไม่ลบอะไรเลย (raise ทำให้
+        # engine.begin() rollback ทรานแซกชันทั้งหมดอัตโนมัติ)
+        blockers = _fk_blockers(conn)
+        if blockers:
+            print("!! พบ FK blocker ที่ยังไม่ได้จัดการ - ยกเลิกการลบทันที ไม่มีอะไรถูกลบ:")
+            for child_table, child_column, parent_table, delete_rule in blockers:
+                print(f"   - {child_table}.{child_column} -> {parent_table} ({delete_rule})")
+            raise RuntimeError("พบ FK blocker ที่ยังไม่ได้จัดการ - ยกเลิกการลบ (ดู stdout ด้านบน)")
+
+        print("=== reset_production_keep_users.py --apply (ลบจริง) ===\n")
+        _print_counts(conn, "ก่อนลบ")
+        print()
+
+        result_student = conn.execute(text("DELETE FROM student"))
+        result_curriculum = conn.execute(text("DELETE FROM curriculum"))
+        result_user = conn.execute(text("DELETE FROM \"user\" WHERE role != 'admin'"))
+        print(
+            f"ลบแล้ว: student {result_student.rowcount} แถว (ตรงๆ), "
+            f"curriculum {result_curriculum.rowcount} แถว (ตรงๆ - ที่เหลือลบผ่าน cascade), "
+            f"user {result_user.rowcount} แถว (ตรงๆ)\n"
+        )
+
+        _print_counts(conn, "หลังลบ")
+        # commit เกิดอัตโนมัติตอนออกจาก engine.begin() context โดยไม่มี exception
 
 
 def main() -> int:
