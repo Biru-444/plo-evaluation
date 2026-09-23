@@ -3,7 +3,9 @@
          ไฟล์ .pdf/.docx + curriculum_id ส่งให้ Gemini แกะข้อมูลวิชา/CLO/CLO-PLO mapping ออกมาเป็น
          JSON ให้ frontend แสดงหน้าตรวจสอบ (ไม่เขียน DB เลย) - Phase 2 (POST
          /courses/import-from-mco3/save) รับผลลัพธ์ที่แอดมินตรวจ/แก้ไขแล้วจากหน้านั้น มาบันทึกจริง
-         เป็น Course + CLO + CLOPLOMapping + StudyPlan 1 แถว (ไม่เรียก Gemini ซ้ำ ไม่แตะไฟล์ต้นฉบับอีกแล้ว)
+         เป็น Course + CLO + CLOPLOMapping + StudyPlan 1 แถว (ถ้าระบุชั้นปี/ภาคการศึกษามา - วิชาเลือกที่
+         ไม่มีชั้นปีตายตัวเว้นว่างได้ ดู module docstring ของ app/schemas/course_import.py) ไม่เรียก
+         Gemini ซ้ำ ไม่แตะไฟล์ต้นฉบับอีกแล้ว
 
 เชื่อมกับ : Phase 1 เรียก app.services.mco3_import_service ล้วนๆ ไม่มี logic เรียก Gemini/แกะไฟล์อยู่
             ในไฟล์นี้เอง - หลัง Gemini ตอบกลับมาแล้ว _add_domain_category_mismatch_flags() เติม flag
@@ -40,9 +42,12 @@
          app/schemas/course_import.py - คนละ schema กัน) Phase 2 ที่นี่แค่รับค่าที่ frontend คำนวณมาแล้ว
          ส่งต่อเข้า CLOPLOMapping ตรงๆ ไม่มีการ auto-fill/rebalance เพิ่มอีกชั้น
 
-         study_plan ที่สร้างที่นี่เป็นแผนมาตรฐานเสมอ (cohort_year=NULL) เพราะ มคอ.3 ไม่มีแนวคิด "รุ่น
-         นักศึกษา" อยู่แล้ว (เป็นเอกสารระดับวิชา ไม่ใช่ระดับรุ่น) ถ้าแอดมินต้องการแผนเฉพาะรุ่นทีหลัง ต้อง
-         ไปเพิ่มเองผ่านหน้าจัดการ study_plan ปกติแยกต่างหาก
+         study_plan ที่สร้างที่นี่ (ถ้าสร้าง) เป็นแผนมาตรฐานเสมอ (cohort_year=NULL) เพราะ มคอ.3 ไม่มี
+         แนวคิด "รุ่นนักศึกษา" อยู่แล้ว (เป็นเอกสารระดับวิชา ไม่ใช่ระดับรุ่น) ถ้าแอดมินต้องการแผนเฉพาะรุ่น
+         ทีหลัง ต้องไปเพิ่มเองผ่านหน้าจัดการ study_plan ปกติแยกต่างหาก - year_level/semester เป็น optional
+         คู่กัน (ต้องมีทั้งคู่หรือไม่มีเลย ไม่งั้น 422) เพราะวิชาเลือกหลายวิชาไม่มีชั้นปีตายตัวในเอกสารจริง
+         บังคับกรอกจะทำให้ถูกจัดเข้า YLO ปีที่ผิดโดยไม่มีมูล (ดู has_year_level/has_semester ในฟังก์ชัน
+         save_course_from_mco3 ด้านล่าง)
 """
 from __future__ import annotations
 
@@ -192,6 +197,17 @@ def save_course_from_mco3(
             detail=f"clo_plo_mapping อ้างถึง plo_code ที่ไม่มีอยู่ในหลักสูตรนี้: {unknown_plo_refs}",
         )
 
+    # year_level/semester เป็น optional คู่กัน (วิชาเลือกไม่มีชั้นปีตายตัว - ดู CourseImportSaveRequest
+    # docstring) - ต้องเป็นคู่เสมอ (ทั้งคู่มีค่า หรือทั้งคู่ null) มีแค่ตัวเดียวคือข้อมูลไม่ครบ ไม่ใช่กรณีที่
+    # Pydantic Field เช็คเองได้ (คนละ field กัน) เช็คเองตรงนี้ก่อนแตะ DB เหมือนเงื่อนไขอื่นด้านบน
+    has_year_level = payload.year_level is not None
+    has_semester = payload.semester is not None
+    if has_year_level != has_semester:
+        raise HTTPException(
+            status_code=422,
+            detail="ต้องกรอกทั้งชั้นปีและภาคการศึกษาคู่กัน หรือเว้นว่างทั้งคู่ (ถ้าวิชานี้ไม่มีชั้นปีตายตัว)",
+        )
+
     # ทุกอย่างตั้งแต่ course ถึง commit อยู่ใน try เดียวกัน - db.flush() (ใช้เอา id ที่ถูก generate มา
     # อ้างอิงต่อ ก่อนจะ commit จริง) ก็ยิง SQL ไป DB จริงและ raise IntegrityError ได้ทันทีเหมือนกัน ไม่ใช่
     # แค่ db.commit() ท้ายสุด - ถ้า except ครอบแค่ commit() เฉยๆ error จาก flush() ระหว่างทางจะหลุดออกไป
@@ -231,17 +247,20 @@ def save_course_from_mco3(
                 )
             )
 
-        # แผนมาตรฐาน (cohort_year=NULL) เสมอ - มคอ.3 เป็นเอกสารระดับวิชา ไม่มีแนวคิด "รุ่นนักศึกษา" ให้
-        # อ้างอิง (ดู module docstring) course เพิ่งสร้างในทรานแซกชันนี้เอง ไม่มีทางชน
-        # UniqueConstraint(curriculum_id, course_id, cohort_year) เดิมอยู่แล้ว ไม่ต้องเช็คซ้ำก่อน
-        study_plan = StudyPlan(
-            curriculum_id=payload.curriculum_id,
-            course_id=course.id,
-            cohort_year=None,
-            year_level=payload.year_level,
-            semester=payload.semester,
-        )
-        db.add(study_plan)
+        # แผนมาตรฐาน (cohort_year=NULL) เสมอ ถ้ามี - มคอ.3 เป็นเอกสารระดับวิชา ไม่มีแนวคิด "รุ่นนักศึกษา"
+        # ให้อ้างอิง (ดู module docstring) course เพิ่งสร้างในทรานแซกชันนี้เอง ไม่มีทางชน
+        # UniqueConstraint(curriculum_id, course_id, cohort_year) เดิมอยู่แล้ว ไม่ต้องเช็คซ้ำก่อน - ไม่สร้าง
+        # เลยถ้า year_level/semester เป็น null ทั้งคู่ (วิชาเลือกที่ไม่มีชั้นปีตายตัว - เช็คคู่กันแล้วด้านบน)
+        study_plan: StudyPlan | None = None
+        if has_year_level:
+            study_plan = StudyPlan(
+                curriculum_id=payload.curriculum_id,
+                course_id=course.id,
+                cohort_year=None,
+                year_level=payload.year_level,
+                semester=payload.semester,
+            )
+            db.add(study_plan)
 
         db.commit()
     except IntegrityError as exc:
@@ -252,11 +271,12 @@ def save_course_from_mco3(
         ) from exc
 
     db.refresh(course)
-    db.refresh(study_plan)
+    if study_plan is not None:
+        db.refresh(study_plan)
     clos = db.query(CLO).filter(CLO.course_id == course.id).order_by(CLO.id).all()
 
     return CourseImportSaveResponse(
         course=CourseSchema.model_validate(course),
-        study_plan=StudyPlanSchema.model_validate(study_plan),
+        study_plan=StudyPlanSchema.model_validate(study_plan) if study_plan is not None else None,
         clos=[CLOSchema.model_validate(c) for c in clos],
     )

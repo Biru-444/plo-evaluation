@@ -111,8 +111,9 @@ def test_save_creates_course_clos_and_mapping(client, db_session, curriculum, pl
 
 
 def test_save_creates_standard_study_plan_from_year_level_and_semester(client, db_session, curriculum, plos):
-    """study_plan ต้องถูกสร้างคู่กับ course เสมอในคำขอเดียวกัน - cohort_year เป็น NULL เสมอ (แผน
-    มาตรฐาน มคอ.3 ไม่มีแนวคิด "รุ่นนักศึกษา") year_level/semester ตรงกับค่าที่ส่งมาเป๊ะ"""
+    """ทั้ง year_level และ semester มีค่า -> study_plan ถูกสร้างคู่กับ course ในคำขอเดียวกัน -
+    cohort_year เป็น NULL เสมอ (แผนมาตรฐาน มคอ.3 ไม่มีแนวคิด "รุ่นนักศึกษา") year_level/semester ตรงกับ
+    ค่าที่ส่งมาเป๊ะ"""
     resp = client.post(
         "/courses/import-from-mco3/save",
         json=_payload(curriculum.id, course_code="TEST105", year_level=2, semester=1),
@@ -131,6 +132,34 @@ def test_save_creates_standard_study_plan_from_year_level_and_semester(client, d
     assert study_plan_in_db.cohort_year is None
     assert study_plan_in_db.year_level == 2
     assert study_plan_in_db.semester == 1
+
+
+def test_save_with_both_year_level_and_semester_null_creates_no_study_plan(
+    client, db_session, curriculum, plos
+):
+    """วิชาเลือกที่ไม่มีชั้นปีตายตัว - เว้นว่างทั้งคู่ได้ course/CLO ยังถูกสร้างปกติ แต่ไม่มี study_plan
+    เกิดขึ้นเลย (ไม่ใช่แถวที่มีค่า null สองตัว - ไม่มีแถวเลย)"""
+    resp = client.post(
+        "/courses/import-from-mco3/save",
+        json=_payload(curriculum.id, course_code="TEST108", year_level=None, semester=None),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["study_plan"] is None
+
+    course = db_session.query(Course).filter(Course.course_code == "TEST108").first()
+    assert course is not None
+    assert db_session.query(StudyPlan).filter(StudyPlan.course_id == course.id).count() == 0
+
+
+@pytest.mark.parametrize("field", ["year_level", "semester"])
+def test_save_rejects_exactly_one_of_year_level_semester_with_422(client, curriculum, plos, field):
+    """มีค่าแค่ field เดียว (อีก field เป็น null) - ข้อมูลไม่ครบ ต้อง 422 พร้อมข้อความไทยที่อ่านเข้าใจได้"""
+    payload = _payload(curriculum.id, course_code="TEST109")
+    payload[field] = None
+    resp = client.post("/courses/import-from-mco3/save", json=payload)
+    assert resp.status_code == 422
+    assert "ชั้นปี" in resp.text and "ภาคการศึกษา" in resp.text
 
 
 @pytest.mark.parametrize("bad_year_level", [0, 5])

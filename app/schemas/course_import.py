@@ -111,11 +111,18 @@ class CourseImportSaveRequest(BaseModel):
     audit trail (ตามที่ผู้ใช้ยืนยัน 2026-09-22) - curriculum_mismatch ที่แอดมินเห็น warning แล้วยังกด
     บันทึกต่อ ก็ไม่ถูกเช็คซ้ำที่นี่เช่นกัน (แอดมินตัดสินใจแล้วตอนตรวจ ไม่ block)
 
-    year_level/semester (เพิ่ม 2026-09) : ค่าสุดท้ายที่แอดมินยืนยันแล้วจากการเดา semester_display อัตโนมัติ
-    (ดู module docstring) - Phase 2 ใช้สร้าง study_plan 1 แถวคู่กับ course ที่สร้างในคำขอเดียวกันเสมอ
-    (cohort_year=NULL เสมอ = แผนมาตรฐาน ใช้กับทุกรุ่น ไม่ใช่แผนเฉพาะรุ่นใดรุ่นหนึ่ง - มคอ.3 ไม่มีแนวคิด
-    "รุ่นนักศึกษา" อยู่แล้ว) required เสมอ (ไม่มี default) - บังคับให้แอดมินเห็น/ยืนยันค่านี้ก่อนบันทึกทุกครั้ง
-    ไม่ปล่อยให้เผลอเป็นค่าว่าง/ผิดเงียบๆ"""
+    year_level/semester (เพิ่ม 2026-09, เปลี่ยนเป็น optional 2026-09-23) : ค่าสุดท้ายที่แอดมินยืนยันแล้ว
+    จากการเดา semester_display อัตโนมัติ (ดู module docstring) - Phase 2 ใช้สร้าง study_plan 1 แถวคู่กับ
+    course ที่สร้างในคำขอเดียวกัน (cohort_year=NULL เสมอ = แผนมาตรฐาน ใช้กับทุกรุ่น ไม่ใช่แผนเฉพาะรุ่นใด
+    รุ่นหนึ่ง - มคอ.3 ไม่มีแนวคิด "รุ่นนักศึกษา" อยู่แล้ว)
+
+    ทั้งสอง field เป็น optional (ไม่ required เหมือนตอนแรก) เพราะวิชาเลือกหลายวิชาไม่มีชั้นปีตายตัวใน
+    มคอ.3 (เปิดให้เลือกได้หลายชั้นปี) - บังคับกรอกจะทำให้ถูกจัดเข้า YLO ปีที่ผิดโดยไม่มีมูล ดังนั้น :
+      - ทั้งคู่มีค่า -> สร้าง study_plan
+      - ทั้งคู่เป็น null -> ไม่สร้าง study_plan เลย (วิชานี้ยังไม่มีแผนการศึกษา ไปเพิ่มทีหลังผ่านหน้า
+        จัดการ study_plan ปกติได้ถ้าจำเป็น)
+      - มีค่าแค่ตัวเดียว -> 422 (ข้อมูลไม่ครบ ไม่ใช่ error ที่ Pydantic เช็คได้เองเพราะเป็นเงื่อนไขข้าม
+        field - เช็คเองในตัว route ก่อนแตะ DB ดู app/routes/course_import.py)"""
 
     curriculum_id: int
     course_code: str
@@ -125,13 +132,14 @@ class CourseImportSaveRequest(BaseModel):
     category: str | None = None
     clos: list[MCO3CLOItem] = Field(default_factory=list)
     clo_plo_mapping: list[MCO3CLOPLOMappingSaveItem] = Field(default_factory=list)
-    year_level: int = Field(ge=1, le=4)
-    semester: int = Field(ge=1, le=3)
+    year_level: int | None = Field(None, ge=1, le=4)
+    semester: int | None = Field(None, ge=1, le=3)
 
 
 class CourseImportSaveResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     course: CourseSchema
-    study_plan: StudyPlanSchema
+    # None = ไม่ได้สร้าง study_plan (ทั้ง year_level/semester เป็น null ในคำขอ - วิชานี้ยังไม่มีแผนการศึกษา)
+    study_plan: StudyPlanSchema | None = None
     clos: list[CLOSchema]
