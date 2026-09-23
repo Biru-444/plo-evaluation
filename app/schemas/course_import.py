@@ -31,11 +31,12 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.clo import CLOSchema
 from app.schemas.course import CourseSchema
 from app.schemas.study_plan import StudyPlanSchema
+from app.services.code_normalize import normalize_code
 
 
 MCO3CLODomain = Literal["knowledge", "skills", "ethics", "character"]
@@ -49,6 +50,14 @@ class MCO3CLOItem(BaseModel):
     # clo.domain ที่เพิ่มไว้แล้วใน migrate_add_clo_domain.py
     domain: MCO3CLODomain | None = None
 
+    # normalize ทั้ง Phase 1 (ผลลัพธ์ดิบจาก Gemini - ให้ frontend ได้ code ที่ canonical แล้วตั้งแต่ต้น)
+    # และ Phase 2 (บันทึกจริง - schema เดียวกัน) - บั๊กจริงที่เจอ 2026-09-23 ดู
+    # app/services/code_normalize.py
+    @field_validator("code")
+    @classmethod
+    def _normalize_code(cls, v: str) -> str:
+        return normalize_code(v)
+
 
 class MCO3CLOPLOMappingItem(BaseModel):
     """เฉพาะ Phase 1 (ผลลัพธ์ดิบจาก Gemini) - ไม่มี weight_percent เพราะ Gemini บอกได้แค่ว่า CLO ข้อไหน
@@ -56,6 +65,11 @@ class MCO3CLOPLOMappingItem(BaseModel):
 
     clo_code: str
     plo_code: str
+
+    @field_validator("clo_code", "plo_code")
+    @classmethod
+    def _normalize_code(cls, v: str) -> str:
+        return normalize_code(v)
 
 
 class MCO3CLOPLOMappingSaveItem(BaseModel):
@@ -66,6 +80,11 @@ class MCO3CLOPLOMappingSaveItem(BaseModel):
     clo_code: str
     plo_code: str
     weight_percent: Decimal = Field(gt=0, le=100)
+
+    @field_validator("clo_code", "plo_code")
+    @classmethod
+    def _normalize_code(cls, v: str) -> str:
+        return normalize_code(v)
 
 
 MCO3FlagType = Literal[

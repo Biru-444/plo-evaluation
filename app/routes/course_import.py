@@ -70,6 +70,7 @@ from app.schemas.course_import import (
     MCO3ImportFlag,
 )
 from app.schemas.study_plan import StudyPlanSchema
+from app.services.code_normalize import normalize_code
 from app.services.domain_category_check import check_domain_category_mismatch
 from app.services.mco3_import_service import (
     import_course_from_mco3_docx,
@@ -84,17 +85,24 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 # เติม flag "domain_category_mismatch" เข้าไปใน response ของ Phase 1 ทีหลัง - pure code-level เทียบ
 # clo.domain ที่ Gemini แกะได้ กับ plo.category จริงของหลักสูตรนี้ (ดึงจาก DB ตรงๆ ไม่ใช่ให้ Gemini เดา)
 # ไม่แก้ clos/clo_plo_mapping เลย แค่ต่อท้าย flags (Workstream 4)
+#
+# normalize_code() ทั้งฝั่ง key (จาก DB) และฝั่ง lookup (mapping.clo_code/plo_code - ปกติ normalize มา
+# แล้วจาก field_validator ของ MCO3CLOItem/MCO3CLOPLOMappingItem แต่ normalize ซ้ำที่นี่ไม่เสียหาย - กัน
+# ไว้เผื่อ DB มีแถวเก่าที่ยังไม่ผ่าน migration/insert ผ่านทางอื่นที่ไม่ใช่ ORM) บั๊กจริงที่เจอ 2026-09-23:
+# ไม่ normalize ทำให้ plo_category_by_code.get() หาไม่เจอ (คืน None) แล้วขึ้นเตือนว่า PLO "ไม่มีหมวดหมู่"
+# ทั้งที่จริงมีหมวดหมู่ปกติ - แค่ code ไม่ตรงกันเฉยๆ
 def _add_domain_category_mismatch_flags(
     db: Session, curriculum_id: int, result: CourseImportFromMCO3Response
 ) -> CourseImportFromMCO3Response:
-    plo_category_by_code: dict[str, str] = dict(
-        db.query(PLO.code, PLO.category).filter(PLO.curriculum_id == curriculum_id).all()
-    )
-    clo_domain_by_code = {clo.code: clo.domain for clo in result.clos}
+    plo_category_by_code: dict[str, str] = {
+        normalize_code(code): category
+        for code, category in db.query(PLO.code, PLO.category).filter(PLO.curriculum_id == curriculum_id).all()
+    }
+    clo_domain_by_code = {normalize_code(clo.code): clo.domain for clo in result.clos}
 
     for mapping in result.clo_plo_mapping:
-        clo_domain = clo_domain_by_code.get(mapping.clo_code)
-        plo_category = plo_category_by_code.get(mapping.plo_code)
+        clo_domain = clo_domain_by_code.get(normalize_code(mapping.clo_code))
+        plo_category = plo_category_by_code.get(normalize_code(mapping.plo_code))
         message = check_domain_category_mismatch(clo_domain, plo_category)
         if message:
             result.flags.append(
@@ -185,9 +193,12 @@ def save_course_from_mco3(
             detail=f"clo_plo_mapping อ้างถึง clo_code ที่ไม่มีอยู่ใน clos ของคำขอนี้: {unknown_clo_refs}",
         )
 
-    plo_id_by_code: dict[str, int] = dict(
-        db.query(PLO.code, PLO.id).filter(PLO.curriculum_id == payload.curriculum_id).all()
-    )
+    # normalize_code() ที่ key (mapping.plo_code จาก MCO3CLOPLOMappingSaveItem normalize มาแล้วตอน parse
+    # แต่ normalize ฝั่ง DB key ซ้ำอีกชั้นไม่เสียหาย - กันไว้เผื่อมีแถวเก่าที่ยังไม่ผ่าน migration)
+    plo_id_by_code: dict[str, int] = {
+        normalize_code(code): plo_id
+        for code, plo_id in db.query(PLO.code, PLO.id).filter(PLO.curriculum_id == payload.curriculum_id).all()
+    }
     unknown_plo_refs = sorted(
         {m.plo_code for m in payload.clo_plo_mapping if m.plo_code not in plo_id_by_code}
     )

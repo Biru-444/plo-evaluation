@@ -217,6 +217,28 @@ def test_save_rejects_invalid_curriculum_id_with_404(client):
     assert resp.status_code == 404
 
 
+def test_save_matches_plo_code_regardless_of_spacing_or_case(client, db_session, curriculum):
+    """เทสตรงๆ ของบั๊กจริง (2026-09-23): มคอ.2 import เคยบันทึก plo.code เป็น "PLO 4" (มีช่องว่าง - จำลอง
+    ด้วยการ insert ตรงๆ ผ่าน ORM ที่นี่ ข้าม field_validator ที่ปกติ normalize ให้อยู่แล้วตอนสร้างผ่าน
+    endpoint ปกติ) ส่วน มคอ.3 extraction คืน "PLO4" (ไม่มีช่องว่าง ตามที่เอกสารเขียนจริง) - save ต้อง
+    สำเร็จและ resolve ไปที่ PLO แถวเดิมได้ถูกต้อง ไม่ใช่ 400 "ไม่มีอยู่ในหลักสูตรนี้" เหมือนก่อนแก้"""
+    plo = PLO(curriculum_id=curriculum.id, code="PLO 4", description_th="ทดสอบ", category="ความรู้")
+    db_session.add(plo)
+    db_session.commit()
+    db_session.refresh(plo)
+
+    payload = _payload(curriculum.id, course_code="TESTNORM1")
+    payload["clos"] = [{"code": "CLO1", "description": "ทดสอบ", "domain": "knowledge"}]
+    payload["clo_plo_mapping"] = [{"clo_code": "clo 1", "plo_code": "PLO4", "weight_percent": 100}]
+
+    resp = client.post("/courses/import-from-mco3/save", json=payload)
+    assert resp.status_code == 201
+
+    mapping = db_session.query(CLOPLOMapping).filter(CLOPLOMapping.plo_id == plo.id).one()
+    clo = db_session.get(CLO, mapping.clo_id)
+    assert clo.code == "CLO1"  # "clo 1" ใน payload ถูก normalize เป็น "CLO1" ก่อนบันทึกจริง
+
+
 def test_save_is_atomic_nothing_persists_when_clo_codes_collide_within_payload(
     client, db_session, curriculum, plos
 ):

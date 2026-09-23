@@ -20,10 +20,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.curriculum import CurriculumSchema
 from app.schemas.plo import PLOSchema
+from app.services.code_normalize import normalize_code
 
 
 # ต้องตรงกับ PLO_CATEGORY_OPTIONS ใน plo-frontend/src/pages/admin/AdminPLO.jsx เป๊ะ (ค่าที่เก็บจริงใน
@@ -39,6 +40,14 @@ class MCO2PLOItem(BaseModel):
     # หมวดหมู่ของ PLO ข้อนี้ - null ถ้าเอกสารไม่ได้ระบุชัดเจนพอจะแม็ปเข้า 4 ค่านี้ได้ตรงๆ (ห้ามเดา
     # เหมือนกฎเดียวกับ clo.domain ใน มคอ.3)
     category: MCO2PLOCategory | None = None
+
+    # normalize ทั้ง Phase 1 (แสดงผล) และ Phase 2 (บันทึกจริง - schema เดียวกัน) - บั๊กจริงที่เจอ
+    # 2026-09-23: มคอ.2 เคยบันทึก "PLO 1".."PLO 9" (มีช่องว่าง) ทำให้ มคอ.3 extraction ที่คืน "PLO4"
+    # (ไม่มีช่องว่าง) จับคู่ไม่ติด - ดู app/services/code_normalize.py
+    @field_validator("code")
+    @classmethod
+    def _normalize_code(cls, v: str) -> str:
+        return normalize_code(v)
 
 
 MCO2FlagType = Literal[

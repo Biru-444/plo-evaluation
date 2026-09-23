@@ -5,7 +5,9 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.code_normalize import normalize_code
 
 CLODomain = Literal["knowledge", "skills", "ethics", "character"]
 
@@ -36,6 +38,13 @@ class CLOCreateSchema(BaseModel):
     # จำนวนเต็มเท่านั้น 0-100
     pass_threshold_percent: int = Field(default=60, ge=0, le=100)
     plo_ids: list[int] | None = None
+
+    # normalize เสมอตอนสร้างใหม่ด้วยมือ (เว้นช่องว่าง/ตัวพิมพ์เล็ก/เลขไทยต้องไม่ทำให้รหัสซ้ำหลุดผ่านไป
+    # ได้ - ดู app/services/code_normalize.py)
+    @field_validator("code")
+    @classmethod
+    def _normalize_code(cls, v: str) -> str:
+        return normalize_code(v)
 
 
 class CLOUpdateSchema(BaseModel):

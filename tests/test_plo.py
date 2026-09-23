@@ -63,3 +63,37 @@ def test_update_category_succeeds(client, db_session, curriculum):
 
     db_session.refresh(plo)
     assert plo.category == "ทักษะ"
+
+
+@pytest.mark.parametrize("raw_code", ["PLO 4", "plo4", "PLO4", "PLO ๔", "  Plo 4  "])
+def test_create_normalizes_code(client, curriculum, raw_code):
+    """"PLO 4"/"plo4"/"PLO4"/"PLO ๔" ทั้งหมดต้องถูกบันทึกเป็น "PLO4" เดียวกัน (ดู
+    app/services/code_normalize.py) - บั๊กจริงที่เจอ 2026-09-23: มคอ.2 import เคยบันทึกรูปแบบมีช่องว่าง
+    ทำให้ มคอ.3 import จับคู่ไม่ติด"""
+    resp = client.post(
+        "/plo",
+        json={
+            "curriculum_id": curriculum.id,
+            "code": raw_code,
+            "description_th": "ทดสอบ normalize",
+            "category": "ความรู้",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["code"] == "PLO4"
+
+
+def test_update_normalizes_code(client, db_session, curriculum):
+    plo = PLO(
+        curriculum_id=curriculum.id,
+        code="PLO1",
+        description_th="ทดสอบ PLO",
+        category="ความรู้",
+    )
+    db_session.add(plo)
+    db_session.commit()
+    db_session.refresh(plo)
+
+    resp = client.put(f"/plo/{plo.id}", json={"code": "plo 9"})
+    assert resp.status_code == 200
+    assert resp.json()["code"] == "PLO9"
