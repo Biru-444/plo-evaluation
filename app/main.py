@@ -9,10 +9,13 @@
 ถ้าแก้ : ลืมเพิ่ม app.include_router(...) ให้ router ใหม่ = endpoint นั้นเรียกไม่ได้เลย (404) ทั้งที่โค้ด
          ถูกต้อง — ต้องเพิ่มทั้ง import และ include_router คู่กันเสมอ
 """
+import logging
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from app.database import Base, engine
 from app.routes import (
     assessment,
@@ -50,6 +53,45 @@ app = FastAPI(
     description="Backend API for Program Learning Outcomes Evaluation",
     version="1.0.0",
 )
+
+logger = logging.getLogger("app")
+
+
+class _CatchUnhandledExceptionsMiddleware(BaseHTTPMiddleware):
+    """
+    ทำอะไร : จับ exception ที่ไม่มีใคร handle (bug จริงในโค้ด ไม่ใช่ HTTPException ที่ตั้งใจ raise เช่น
+             404/403) ทุกตัว คืน JSON 500 ธรรมดาแทนที่จะปล่อยให้หลุดออกไป
+
+    เชื่อมกับ : ต้องลงทะเบียนก่อน CORSMiddleware เสมอ (ดูลำดับ app.add_middleware ด้านล่าง) เพราะ
+                Starlette วาง middleware ที่ add ก่อนไว้ "ในกว่า" (ใกล้ router มากกว่า) middleware ที่
+                add ทีหลัง - ต้องอยู่ในกว่า CORSMiddleware เพื่อให้ response ที่สร้างที่นี่วิ่งผ่านการ
+                ห่อ CORS header ของ CORSMiddleware จริงๆ
+
+                @app.exception_handler(Exception) ใช้ไม่ได้กับปัญหานี้ (ลองแล้ว) เพราะ Starlette
+                (Starlette.build_middleware_stack) ดึง handler ของ Exception/500 ออกไปให้
+                ServerErrorMiddleware ใช้โดยเฉพาะ ซึ่ง ServerErrorMiddleware เป็น middleware ชั้นนอกสุด
+                เสมอ (อยู่นอก CORSMiddleware ไม่ว่าจะลงทะเบียนตอนไหน) - response จาก handler นั้นเลยยัง
+                ไม่ผ่าน CORSMiddleware อยู่ดี (และ Starlette ยัง re-raise exception ต่อเสมอหลังเรียก
+                handler นั้นด้วย เพื่อให้ TestClient/log เห็น traceback) ต้องใช้ ASGI middleware จริงๆ
+                (BaseHTTPMiddleware) ที่ตำแหน่งถูกต้องแทนเท่านั้น
+
+    ถ้าแก้ : เจอปัญหานี้จริงตอน debug PLODashboard.jsx (2026-09) - frontend (Vercel) เรียก backend
+             (Render) ข้าม origin แล้วได้ exception ที่ไม่มีใคร handle, ฝั่ง browser เห็นเป็น "blocked
+             by CORS policy" แทนที่จะเห็น 500 จริงๆ เพราะ response ก่อนแก้ไม่มี header
+             Access-Control-Allow-Origin ติดไปด้วยเลย ทำให้วินิจฉัยผิดทางไปไกล
+    """
+
+    async def dispatch(self, request, call_next):
+        try:
+            return await call_next(request)
+        except Exception:
+            logger.exception("Unhandled exception on %s %s", request.method, request.url)
+            return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+# ต้อง add ก่อน CORSMiddleware เสมอ (ดู docstring ของ _CatchUnhandledExceptionsMiddleware ด้านบน) -
+# สลับลำดับสองบรรทัดนี้จะทำให้ response 500 ไม่มี CORS header อีกครั้ง
+app.add_middleware(_CatchUnhandledExceptionsMiddleware)
 
 # Add CORS middleware for React frontend - อ่านจาก env var ALLOWED_ORIGINS (คั่นด้วย comma) เพื่อ
 # ให้ตั้งค่า origin ของ frontend ที่ deploy จริง (เช่น Vercel) ได้โดยไม่ต้องแก้โค้ด ถ้าไม่ได้ตั้งค่าไว้
