@@ -1,6 +1,6 @@
 """
 Tests สำหรับ GET /plo/achievement/cohort - endpoint นี้ที่หน้า "ภาพรวม PLO ทั้งหลักสูตร"
-(PLODetailPage.jsx) เรียกใช้ตรงๆ ครอบคลุมทั้ง happy path เดิม (สร้างข้อมูลผ่าน clo_plo_mapping
+(PLODashboard.jsx) เรียกใช้ตรงๆ ครอบคลุมทั้ง happy path เดิม (สร้างข้อมูลผ่าน clo_plo_mapping
 โดยตรง) และสูตรถ่วงน้ำหนักใหม่ของ Workstream 3 (PLO_x = Σ(mastery×weight)/Σ(weight) - ดู
 app/routes/plo_calculation.py module docstring)
 

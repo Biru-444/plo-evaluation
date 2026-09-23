@@ -11,8 +11,8 @@
 CurriculumPLOAchievement) ย้ายไป app/schemas/plo_calculation.py แล้วเช่นกัน
 
 เชื่อมกับ : - GET /plo/achievement ถูกเรียกจากหน้าผลบรรลุรายบุคคล (student-plo / PLOAchievement.jsx)
-            - GET /plo/achievement/cohort ถูกเรียกจากหน้า "ภาพรวม PLO" (PLODashboard.jsx,
-              PLODetailPage.jsx) — เรียก compute_cohort_plo_achievement() ตรงๆ ไม่มีตรรกะคำนวณเองอีก
+            - GET /plo/achievement/cohort ถูกเรียกจากหน้า "ภาพรวม PLO ทั้งหลักสูตร" (PLODashboard.jsx,
+              route /dashboard) — เรียก compute_cohort_plo_achievement() ตรงๆ ไม่มีตรรกะคำนวณเองอีก
               ต่อไป
             - GET /plo/achievement/export คืนไฟล์ Excel จาก compute_cohort_plo_achievement() ตัวเดียว
               กับ endpoint ด้านบน (ดู app/services/plo_report_export_service.py) ตัวเลขจึงตรงกันเป๊ะ

@@ -8,8 +8,8 @@
             GET /plo/achievement/cohort (response_model ตรงๆ) และ GET /plo/achievement/export (ใช้
             ตัวเลขไปสร้างไฟล์ Excel) เรียกฟังก์ชันเดียวกันนั้น ไม่มีสูตรคำนวณซ้ำสองชุด
 
-ถ้าแก้ : ฟิลด์ในนี้เป็น "สัญญา" ของ GET /plo/achievement/cohort ที่ frontend (PLODashboard.jsx,
-         PLODetailPage.jsx) พึ่งพาอยู่แล้ว - ห้ามแก้ชื่อ/ความหมายฟิลด์โดยไม่เช็ค caller ฝั่ง frontend ก่อน
+ถ้าแก้ : ฟิลด์ในนี้เป็น "สัญญา" ของ GET /plo/achievement/cohort ที่ frontend (PLODashboard.jsx)
+         พึ่งพาอยู่แล้ว - ห้ามแก้ชื่อ/ความหมายฟิลด์โดยไม่เช็ค caller ฝั่ง frontend ก่อน
          PLOAchievementItem/StudentPLOAchievement ยังใช้ร่วมกับ GET /plo/achievement (รายบุคคล) ด้วย
          YearlyPLOSummaryItem/YearProgressItem/CurriculumYearProgress/StudentPLOCourseBreakdownItem
          (ของ endpoint /achievement/by-year และ /course-breakdown คนละตัว) ยังอยู่ใน
