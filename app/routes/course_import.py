@@ -3,17 +3,18 @@
          ไฟล์ .pdf/.docx + curriculum_id ส่งให้ Gemini แกะข้อมูลวิชา/CLO/CLO-PLO mapping ออกมาเป็น
          JSON ให้ frontend แสดงหน้าตรวจสอบ (ไม่เขียน DB เลย) - Phase 2 (POST
          /courses/import-from-mco3/save) รับผลลัพธ์ที่แอดมินตรวจ/แก้ไขแล้วจากหน้านั้น มาบันทึกจริง
-         เป็น Course + CLO + CLOPLOMapping (ไม่เรียก Gemini ซ้ำ ไม่แตะไฟล์ต้นฉบับอีกแล้ว)
+         เป็น Course + CLO + CLOPLOMapping + StudyPlan 1 แถว (ไม่เรียก Gemini ซ้ำ ไม่แตะไฟล์ต้นฉบับอีกแล้ว)
 
 เชื่อมกับ : Phase 1 เรียก app.services.mco3_import_service ล้วนๆ ไม่มี logic เรียก Gemini/แกะไฟล์อยู่
             ในไฟล์นี้เอง - หลัง Gemini ตอบกลับมาแล้ว _add_domain_category_mismatch_flags() เติม flag
             "domain_category_mismatch" ต่อท้าย flags ให้เอง (pure code-level เทียบ clo.domain กับ
             plo.category จริงจาก DB ผ่าน app.services.domain_category_check - Gemini ไม่ตัดสินเรื่องนี้
             เลย ดู Workstream 4 ใน แผนการแก้ไขครั้งใหญ่-PLO-CLO.md) - Phase 2 ไม่เรียก service นั้นเลย
-            เขียน object (Course/CLO/CLOPLOMapping) ตรงๆ ในทรานแซกชันเดียว เลียนแบบแพทเทิร์นเดียวกับ
-            create_clo ใน app/routes/clo.py (db.add course -> db.flush() เอา id -> db.add CLO ทีละตัว
-            -> db.flush() เอา id -> db.add CLOPLOMapping -> db.commit() ครั้งเดียวตอนจบ) เพื่อให้
-            atomic จริง (พังตรงไหนก็ rollback หมดทั้งก้อน ไม่ทิ้ง course ที่ไม่มี CLO ค้างไว้)
+            เขียน object (Course/CLO/CLOPLOMapping/StudyPlan) ตรงๆ ในทรานแซกชันเดียว เลียนแบบแพทเทิร์น
+            เดียวกับ create_clo ใน app/routes/clo.py (db.add course -> db.flush() เอา id -> db.add CLO
+            ทีละตัว -> db.flush() เอา id -> db.add CLOPLOMapping -> db.add StudyPlan -> db.commit()
+            ครั้งเดียวตอนจบ) เพื่อให้ atomic จริง (พังตรงไหนก็ rollback หมดทั้งก้อน ไม่ทิ้ง course ที่ไม่มี
+            CLO/แผนการศึกษาค้างไว้)
 
 ถ้าแก้ : สิทธิ์ทั้งสอง endpoint ตั้งใจให้ admin เท่านั้น (require_role("admin")) เพราะเป็นฟีเจอร์เตรียม
          นำเข้าข้อมูลหลักสูตร/วิชาระดับระบบ ไม่ใช่งานแก้ไขวิชาที่ตัวเองสอนแบบ create_clo ทั่วไป (course
@@ -23,9 +24,12 @@
          หลักสูตร = 409 ตรงๆ ไม่มี update/merge mode ให้แอดมินไปแก้ผ่านหน้าจัดการวิชาปกติแทน ถ้าต้องการ
          update-mode ในอนาคตต้องออกแบบแยกต่างหาก (มีนัยเรื่อง CLO ที่มีอยู่แล้วบางส่วน vs ใหม่ทั้งหมด)
 
-         flags[]/instructor_name/semester_display ของ Phase 1 ไม่ถูกส่งมาที่นี่เลย (ไม่มีในสคีมา
-         CourseImportSaveRequest) เพราะไม่ต้องเก็บเป็น audit trail และไม่มีคอลัมน์ปลายทางให้เก็บ -
-         ทิ้งได้เลยหลังแอดมินตรวจในหน้า Phase 3 เสร็จ ห้ามเพิ่มโค้ดมาบันทึกย้อนหลังโดยไม่ปรึกษาก่อน
+         flags[]/instructor_name/semester_display (ข้อความดิบ) ของ Phase 1 ไม่ถูกส่งมาที่นี่เลย (ไม่มีใน
+         สคีมา CourseImportSaveRequest) เพราะไม่ต้องเก็บเป็น audit trail และไม่มีคอลัมน์ปลายทางให้เก็บ -
+         ทิ้งได้เลยหลังแอดมินตรวจในหน้า Phase 3 เสร็จ (semester_display ถูกเดาแยกเป็น
+         year_level/semester ฝั่ง frontend ก่อนถึงจะส่งมาที่นี่ - ดู module docstring ของ
+         app/schemas/course_import.py - สองตัวเลขนั้นเก็บจริงผ่าน study_plan ที่นี่ ส่วนข้อความดิบเองยัง
+         ไม่มีที่เก็บเหมือนเดิม)
 
          เพิ่มนามสกุลไฟล์ใหม่ที่ Phase 1 รองรับ ต้องเพิ่มใน ALLOWED_EXTENSIONS ด้วย ไม่งั้นโดน 400
          ปฏิเสธตั้งแต่ต้น
@@ -35,6 +39,10 @@
          1/Gemini ไม่รู้จัก field นี้เลย (ดู MCO3CLOPLOMappingItem vs MCO3CLOPLOMappingSaveItem ใน
          app/schemas/course_import.py - คนละ schema กัน) Phase 2 ที่นี่แค่รับค่าที่ frontend คำนวณมาแล้ว
          ส่งต่อเข้า CLOPLOMapping ตรงๆ ไม่มีการ auto-fill/rebalance เพิ่มอีกชั้น
+
+         study_plan ที่สร้างที่นี่เป็นแผนมาตรฐานเสมอ (cohort_year=NULL) เพราะ มคอ.3 ไม่มีแนวคิด "รุ่น
+         นักศึกษา" อยู่แล้ว (เป็นเอกสารระดับวิชา ไม่ใช่ระดับรุ่น) ถ้าแอดมินต้องการแผนเฉพาะรุ่นทีหลัง ต้อง
+         ไปเพิ่มเองผ่านหน้าจัดการ study_plan ปกติแยกต่างหาก
 """
 from __future__ import annotations
 
@@ -47,7 +55,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_role
 from app.database import get_db
-from app.models import CLO, CLOPLOMapping, Course, Curriculum, PLO, User
+from app.models import CLO, CLOPLOMapping, Course, Curriculum, PLO, StudyPlan, User
 from app.schemas.clo import CLOSchema
 from app.schemas.course import CourseSchema
 from app.schemas.course_import import (
@@ -56,6 +64,7 @@ from app.schemas.course_import import (
     CourseImportSaveResponse,
     MCO3ImportFlag,
 )
+from app.schemas.study_plan import StudyPlanSchema
 from app.services.domain_category_check import check_domain_category_mismatch
 from app.services.mco3_import_service import (
     import_course_from_mco3_docx,
@@ -222,6 +231,18 @@ def save_course_from_mco3(
                 )
             )
 
+        # แผนมาตรฐาน (cohort_year=NULL) เสมอ - มคอ.3 เป็นเอกสารระดับวิชา ไม่มีแนวคิด "รุ่นนักศึกษา" ให้
+        # อ้างอิง (ดู module docstring) course เพิ่งสร้างในทรานแซกชันนี้เอง ไม่มีทางชน
+        # UniqueConstraint(curriculum_id, course_id, cohort_year) เดิมอยู่แล้ว ไม่ต้องเช็คซ้ำก่อน
+        study_plan = StudyPlan(
+            curriculum_id=payload.curriculum_id,
+            course_id=course.id,
+            cohort_year=None,
+            year_level=payload.year_level,
+            semester=payload.semester,
+        )
+        db.add(study_plan)
+
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -231,9 +252,11 @@ def save_course_from_mco3(
         ) from exc
 
     db.refresh(course)
+    db.refresh(study_plan)
     clos = db.query(CLO).filter(CLO.course_id == course.id).order_by(CLO.id).all()
 
     return CourseImportSaveResponse(
         course=CourseSchema.model_validate(course),
+        study_plan=StudyPlanSchema.model_validate(study_plan),
         clos=[CLOSchema.model_validate(c) for c in clos],
     )
