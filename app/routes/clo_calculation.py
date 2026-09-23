@@ -50,6 +50,7 @@ from app.models import (
     StudentScore,
     User,
 )
+from app.routes.enrollment import _require_offering_ownership
 from app.schemas.clo_calculation import OfferingCLOAchievement
 from app.services.clo_achievement_service import compute_offering_clo_achievement
 from app.services.clo_report_export_service import build_clo_report_excel
@@ -104,10 +105,11 @@ def get_offering_clo_achievement(
 
     ถ้าแก้ : 404 ถ้าไม่พบ offering_id — นักศึกษาที่ weight_total เป็น 0 (ไม่มีคะแนนชิ้นงานที่ผูกกับ
              CLO นี้เลย) จะถูกนับใน students_without_data ไม่ใช่ passed_count หรือ failed_count
+
+             สิทธิ์ (course-level score data - PDPA) : admin หรืออาจารย์เจ้าของ offering นี้เท่านั้น -
+             403 ถ้าเป็นอาจารย์คนอื่น (เช็คผ่าน _require_offering_ownership ตัวเดียวกับ enrollment.py)
     """
-    offering = db.get(CourseOffering, offering_id)
-    if offering is None:
-        raise HTTPException(status_code=404, detail="Course offering not found")
+    offering = _require_offering_ownership(db, offering_id, current_user)
 
     return compute_offering_clo_achievement(db, offering)
 
@@ -169,6 +171,12 @@ def get_student_course_clo_breakdown(
 
     ถ้าแก้ : 404 ถ้าไม่พบนักศึกษาหรือวิชา — offering_id เป็น None ถ้านักศึกษาคนนี้ไม่เคยลงทะเบียนวิชา
              นี้เลย (clos จะคืนมาแต่ mastery_percent เป็น None ทุกข้อ เพราะไม่มี offering ให้เทียบคะแนน)
+
+             สิทธิ์ (course-level score data - PDPA) : admin หรืออาจารย์เจ้าของ offering ที่นักศึกษาคนนี้
+             ลงทะเบียนไว้จริงเท่านั้น - 403 ถ้าเป็นอาจารย์คนอื่น เช็คหลัง resolve ว่า offering ไหน (ถ้ามี)
+             เพราะต้องรู้ offering จริงก่อนถึงจะรู้ว่าใครเป็นเจ้าของ - ถ้านักศึกษาไม่เคยลงทะเบียนวิชานี้เลย
+             (offering เป็น None) ไม่มี offering ให้เช็คความเป็นเจ้าของ ปล่อยผ่าน (ไม่มีคะแนนให้รั่วอยู่แล้ว
+             - clos ทุกข้อจะได้ mastery_percent เป็น None เหมือนกันหมดไม่ว่าใครเรียก)
     """
     student = db.get(Student, student_id)
     if student is None:
@@ -183,6 +191,8 @@ def get_student_course_clo_breakdown(
         .filter(Enrollment.student_id == student_id, CourseOffering.course_id == course_id)
         .first()
     )
+    if offering is not None:
+        _require_offering_ownership(db, offering.id, current_user)
 
     clos = db.query(CLO).filter(CLO.course_id == course_id).order_by(CLO.code).all()
 

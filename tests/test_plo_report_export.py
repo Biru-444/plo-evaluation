@@ -199,7 +199,10 @@ class TestExportSucceedsWithAllSheets:
 
 
 class TestAccessControl:
-    def test_instructor_has_no_personal_sheet(self, make_client, db_session, admin_user):
+    def test_instructor_also_has_personal_sheet(self, make_client, db_session, admin_user):
+        """PLO ผลบรรลุเป็นข้อมูลระดับหลักสูตร (curriculum-level) ตั้งใจเปิดกว้างให้อาจารย์ทุกคนดูได้
+        เท่า admin (ดู app/routes/plo_calculation.py::export_plo_report_excel) - ต่างจาก CLO export
+        ระดับ offering ที่ยังจำกัดแค่เจ้าของวิชา"""
         curriculum = _make_curriculum(db_session)
         plo = PLO(curriculum_id=curriculum.id, code="PLO1", description_th="ทดสอบ", category="ความรู้")
         db_session.add(plo)
@@ -214,7 +217,7 @@ class TestAccessControl:
         resp = make_client(instructor).get(f"/plo/achievement/export?curriculum_id={curriculum.id}")
         assert resp.status_code == 200
         wb = load_workbook(BytesIO(resp.content))
-        assert "รายบุคคล" not in wb.sheetnames
+        assert "รายบุคคล" in wb.sheetnames
 
     def test_admin_has_personal_sheet(self, client, db_session):
         curriculum = _make_curriculum(db_session)

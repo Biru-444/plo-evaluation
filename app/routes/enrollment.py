@@ -202,6 +202,11 @@ def _parse_roster_file(filename: str, content: bytes) -> list[str]:
 
 
 # คืนรายการลงทะเบียนทั้งหมด กรองตาม offering_id หรือ student_id ได้
+#
+# สิทธิ์ (course-level - final_grade เป็นข้อมูลรายบุคคล) : ระบุ offering_id มา -> เช็คความเป็นเจ้าของ
+# ตรงๆ (403 ถ้าเป็นอาจารย์คนอื่น) ไม่ระบุ offering_id (ทั้ง student_id เดี่ยวๆ หรือไม่ระบุอะไรเลย) ->
+# เฉพาะ admin เท่านั้น เพราะผลลัพธ์อาจกระจายข้าม offering ของอาจารย์หลายคน ไม่มี "เจ้าของ" เดียวให้ 403
+# ตรงๆ ได้ (ผู้เรียกจริงตอนนี้ที่ใช้ pattern นี้คือ AdminEnrollments.jsx ซึ่งเป็นหน้า admin-only อยู่แล้ว)
 @router.get("", response_model=list[EnrollmentSchema])
 def list_enrollments(
     offering_id: int | None = None,
@@ -209,6 +214,11 @@ def list_enrollments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if offering_id is not None:
+        _require_offering_ownership(db, offering_id, current_user)
+    elif current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="ต้องเป็นแอดมินเท่านั้นถึงจะดูข้อมูลข้าม offering ได้")
+
     query = db.query(Enrollment)
     if offering_id is not None:
         query = query.filter(Enrollment.offering_id == offering_id)
@@ -242,7 +252,8 @@ def list_sibling_section_enrollments(
     return [OtherSectionConflict(student_id=sid, section=section) for sid, section in rows]
 
 
-# คืนรายการลงทะเบียนรายตัวตาม id
+# คืนรายการลงทะเบียนรายตัวตาม id - สิทธิ์เหมือน list_enrollments(offering_id=...) (course-level) เพราะ
+# แถวเดียวก็มี offering เจ้าของชัดเจนอยู่แล้ว (403 ถ้าเป็นอาจารย์คนอื่น)
 @router.get("/{enrollment_id}", response_model=EnrollmentSchema)
 def get_enrollment(
     enrollment_id: int,
@@ -252,6 +263,7 @@ def get_enrollment(
     enrollment = db.get(Enrollment, enrollment_id)
     if enrollment is None:
         raise HTTPException(status_code=404, detail="Enrollment not found")
+    _require_offering_ownership(db, enrollment.offering_id, current_user)
     return enrollment
 
 

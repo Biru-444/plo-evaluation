@@ -45,7 +45,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import require_role
 from app.database import get_db
 from app.models import Course, Curriculum, PLO, Student, StudyPlan, User, YLO, YLOPLOMapping
 from app.schemas.plo_calculation import (
@@ -116,7 +116,7 @@ class StudentPLOCourseBreakdownItem(BaseModel):
 def get_plo_achievement(
     student_id: str = Query(..., description="Student ID, e.g. 6500001"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : endpoint คืนผลบรรลุ PLO ทุกข้อของนักศึกษา 1 คน (ตาม curriculum_id ของนักศึกษาคนนั้นเอง)
@@ -126,6 +126,11 @@ def get_plo_achievement(
                 ของนักศึกษาคนที่ล็อกอินอยู่ หรือที่อาจารย์/แอดมินเลือกดู
 
     ถ้าแก้ : เป็น endpoint เดียวที่คืนผลบรรลุ PLO "รายบุคคล" ทั้งระบบ — 404 ถ้าไม่พบ student_id
+
+             สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ (ไม่ต้องเป็น
+             อาจารย์ของนักศึกษาคนนั้นโดยตรง) - ผลบรรลุ PLO เป็นข้อมูลระดับหลักสูตรที่บุคลากรทุกคนของ
+             หลักสูตรควรเห็นภาพรวมได้ ต่างจากคะแนนดิบรายวิชา (ดู GET /clo-achievement/* ที่จำกัดแค่
+             อาจารย์เจ้าของ offering เท่านั้น)
     """
     student = db.get(Student, student_id)
     if student is None:
@@ -145,7 +150,7 @@ def get_student_plo_course_breakdown(
     plo_id: int,
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : คืนวิชาทั้งหมดที่มี CLO ผูกกับ PLO ข้อนี้โดยตรง (จาก clo_plo_mapping) พร้อมสถานะผ่าน/
@@ -156,6 +161,11 @@ def get_student_plo_course_breakdown(
                 ภาพรวม PLO ตอนขยายดูรายชื่อนักศึกษาต่อ PLO (PLOStudentBreakdown.jsx)
 
     ถ้าแก้ : 404 ถ้าไม่พบ PLO หรือนักศึกษา — คืน [] ถ้า PLO นั้นไม่มี CLO ผูกอยู่เลย (ไม่ error)
+
+             สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ เหมือน
+             GET /plo/achievement (ดูเหตุผลที่นั่น) - แม้จะคืนสถานะผ่าน/ไม่ผ่านต่อ "วิชา" แต่เป็นแค่
+             true/false รวม ไม่ใช่คะแนนดิบรายชิ้นงาน (นั่นคือ GET /clo-achievement/student-course ที่
+             จำกัดแค่อาจารย์เจ้าของ offering)
     """
     plo = db.get(PLO, plo_id)
     if plo is None:
@@ -198,7 +208,7 @@ def get_cohort_plo_achievement(
     curriculum_id: int = Query(..., description="Curriculum ID"),
     cohort_year: int | None = Query(None, description="กรองเฉพาะรุ่นที่เข้าเรียนปีนี้ (เช่น 66) - ไม่ใส่ = รวมทุกรุ่น"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : endpoint หลักของหน้า "ภาพรวม PLO" — คืนสรุปผลบรรลุ PLO ทุกข้อของทั้งหลักสูตร (ค่าเฉลี่ย,
@@ -210,6 +220,9 @@ def get_cohort_plo_achievement(
                 (export_plo_report_excel ด้านล่าง) เรียกฟังก์ชันเดียวกันนี้ เพื่อให้ตัวเลขตรงกันเป๊ะ
 
     ถ้าแก้ : 404 ถ้าไม่พบ curriculum_id
+
+             สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ เหมือน
+             GET /plo/achievement (ดูเหตุผลที่นั่น)
     """
     result = compute_cohort_plo_achievement(db, curriculum_id, cohort_year)
     if result is None:
@@ -223,7 +236,7 @@ def export_plo_report_excel(
     cohort_year: int | None = Query(None, description="กรองเฉพาะรุ่นที่เข้าเรียนปีนี้ (เช่น 66) - ไม่ใส่ = รวมทุกรุ่น (จะมีชีตเปรียบเทียบรายรุ่นเพิ่ม)"),
     target_rate: float = Query(70.0, description="เกณฑ์บรรลุระดับหลักสูตร (%) - PLO บรรลุเมื่อร้อยละนักศึกษาที่บรรลุ >= ค่านี้"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : export รายงานภาพรวม PLO ↔ รายวิชาของหลักสูตรเดียวเป็นไฟล์ Excel - ตอบ 3 คำถามหลักของ
@@ -236,15 +249,16 @@ def export_plo_report_excel(
                 ในรายงานตรงกับหน้าเว็บเป๊ะเสมอ ไม่มีสูตรคำนวณซ้ำสองชุด) แล้วส่งต่อให้
                 build_plo_report_excel() (plo_report_export_service.py) จัดรูปแบบ+วาดลง openpyxl
 
-    ถ้าแก้ : สิทธิ์ : admin ได้ทุกชีต / instructor ได้ทุกชีตยกเว้นชีตรายบุคคล (ข้อมูล PDPA) - ตัดสินใจใน
-             build_plo_report_excel() เอง ไม่ใช่ที่นี่ (ไม่มี 403 - ทุก role ที่ล็อกอินแล้ว export ได้
-             แค่เนื้อหาต่างกัน) - 404 ถ้าไม่พบ curriculum_id
+    ถ้าแก้ : สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ ได้ทุกชีตรวมชีต
+             รายบุคคลเหมือนกัน (แก้ 2026-09 ให้ตรงกับ GET /plo/achievement/cohort ที่เปิดกว้างแบบเดียวกัน
+             อยู่แล้ว - เดิม instructor ไม่ได้ชีตรายบุคคล ไม่สอดคล้องกับ endpoint คู่กันที่ให้ดูรายชื่อ
+             นักศึกษาทุกคนอยู่แล้วผ่าน JSON) - 404 ถ้าไม่พบ curriculum_id
     """
     result = compute_cohort_plo_achievement(db, curriculum_id, cohort_year)
     if result is None:
         raise HTTPException(status_code=404, detail="Curriculum not found")
 
-    include_personal_sheet = current_user.role == "admin"
+    include_personal_sheet = current_user.role in ("admin", "instructor")
     workbook_bytes = build_plo_report_excel(
         db,
         result,
@@ -271,13 +285,16 @@ def get_plo_achievement_by_year(
     curriculum_id: int = Query(..., description="Curriculum ID"),
     cohort_year: int | None = Query(None, description="กรองเฉพาะรุ่นที่เข้าเรียนปีนี้ (เช่น 66) - ไม่ใส่ = รวมทุกรุ่น"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : คำนวณผลบรรลุ PLO ด้วยสูตรถ่วงน้ำหนักเดียวกับ /achievement/cohort ทุกประการ แต่รันแยกทีละ
              ชั้นปี (1-4) โดยนับเฉพาะคะแนนวิชาที่อยู่ใน study_plan ของปีนั้น — แต่ละปีจึงสะท้อนสิ่งที่
              สอนในปีนั้นจริง ๆ ไม่ใช่ยอดสะสมทั้งหมด พร้อมทั้งบอกด้วยว่า PLO ข้อไหนที่ YLO ของปีนั้น
              คาดหวังไว้ (is_expected_this_year)
+
+             สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ เหมือน
+             GET /plo/achievement/cohort
 
     เชื่อมกับ : ใช้ _build_plo_requirements + _clo_mastery_for_students_batch (scope ด้วย
                 course_id_filter ต่อปี) — เรียกโดยหน้า "YLO ตามชั้นปี" เพื่อดึง course_count ต่อปี

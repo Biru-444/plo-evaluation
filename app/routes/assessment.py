@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import AssessmentItem, CourseOffering, StudentScore, User
+from app.routes.enrollment import _require_offering_ownership
 from app.schemas import (
     AssessmentCreateSchema,
     AssessmentItemSchema,
@@ -131,6 +132,13 @@ def delete_assessment_item(
 
 # คืนคะแนนของนักศึกษา (ระบุ student_id) หรือของทั้งห้อง (ระบุ offering_id) อย่างใดอย่างหนึ่งต้องมี
 # มาอย่างน้อย 1 ตัว (400 ถ้าไม่ระบุเลย) — join กับ AssessmentItem เพื่อแนบชื่อ/คะแนนเต็มมาให้ในตัวเดียว
+#
+# สิทธิ์ (course-level score data - PDPA) : admin ดูได้ทุกอย่าง — instructor จำกัดตาม offering ที่ตัวเอง
+# สอนเท่านั้น 2 กรณี : (1) ระบุ offering_id มา -> เช็คความเป็นเจ้าของตรงๆ (403 ถ้าไม่ใช่เจ้าของ) เหมือน
+# endpoint อื่น (2) ระบุแค่ student_id (ไม่มี offering_id) -> คะแนนอาจกระจายอยู่หลาย offering คนละอาจารย์
+# กัน ไม่มี "เจ้าของ" เดียวให้ 403 ได้ตรงๆ จึงกรองแถวผลลัพธ์แทน (เหลือเฉพาะ offering ที่ตัวเองสอนจริง) ไม่
+# บล็อกทั้ง request - กันหน้า /scores (ค้นหานักศึกษาคนไหนก็ได้) ไม่ให้อาจารย์เห็นคะแนนวิชาที่ตัวเองไม่ได้สอน
+# โดยไม่ทำให้ workflow ค้นหา/แก้คะแนนนักศึกษาของตัวเองพังไปด้วย
 @router.get("/student-scores", response_model=list[StudentScoreDetailSchema])
 def list_student_scores(
     student_id: str | None = Query(None, description="Student ID, e.g. 6500001"),
@@ -141,11 +149,18 @@ def list_student_scores(
     if student_id is None and offering_id is None:
         raise HTTPException(status_code=400, detail="Provide student_id or offering_id")
 
+    if offering_id is not None:
+        _require_offering_ownership(db, offering_id, current_user)
+
     query = db.query(StudentScore).join(AssessmentItem, StudentScore.item_id == AssessmentItem.id)
     if student_id is not None:
         query = query.filter(StudentScore.student_id == student_id)
     if offering_id is not None:
         query = query.filter(AssessmentItem.offering_id == offering_id)
+    elif current_user.role != "admin":
+        query = query.join(CourseOffering, CourseOffering.id == AssessmentItem.offering_id).filter(
+            CourseOffering.instructor_id == current_user.id
+        )
     scores = query.order_by(StudentScore.id).all()
     return [
         StudentScoreDetailSchema(

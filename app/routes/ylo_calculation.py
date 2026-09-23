@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import require_role
 from app.database import get_db
 from app.models import (
     CLO,
@@ -329,11 +329,14 @@ def get_ylo_achievement(
     year_level: int = Query(..., ge=1, le=4, description="ชั้นปี 1-4"),
     cohort_year: int | None = Query(None, description="กรองเฉพาะรุ่นที่เข้าเรียนปีนี้ (เช่น 66) - ไม่ใส่ = รวมทุกรุ่น"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : endpoint หลักของหน้า "YLO ตามชั้นปี" — คืนผลบรรลุ YLO ของชั้นปีหนึ่ง (year_level) สำหรับ
              นักศึกษาทั้งรุ่นที่เรียนถึงปีนั้นแล้ว พร้อมรายวิชาของปีนั้น กรองตามรุ่น (cohort_year) ได้
+
+    สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ เหมือน
+    GET /plo/achievement/cohort (ดูเหตุผลที่นั่น ใน plo_calculation.py)
 
     เชื่อมกับ : ใช้ _build_ylo_requirements + _clo_mastery_for_student (คำนวณทีละคนในลูป ไม่ได้ batch
                 เหมือนฝั่ง PLO — ดู "ถ้าแก้" ด้านล่าง) และ _year_courses — เรียกโดยหน้า "YLO ตามชั้นปี"
@@ -445,12 +448,15 @@ _STUDENT_YEAR_LEVELS = (1, 2, 3, 4)
 def get_student_ylo_achievement(
     student_id: str = Query(..., description="Student ID, e.g. 6500001"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
     ทำอะไร : เวอร์ชันรายบุคคลของ /achievement/by-year — แทนที่จะเป็น "ปีเดียว ทุกคน" กลายเป็น
              "ทุกปี คนเดียว" คืนผลบรรลุ YLO ครบทั้ง 4 ปีของนักศึกษา 1 คน พร้อมรายวิชาและสถานะผ่าน/
              ไม่ผ่านของแต่ละวิชาในแต่ละปี
+
+    สิทธิ์ (curriculum-level - ตั้งใจเปิดกว้าง) : admin หรืออาจารย์คนไหนก็ได้ เหมือน
+    GET /plo/achievement (ดูเหตุผลที่นั่น ใน plo_calculation.py)
 
     เชื่อมกับ : ใช้ในหน้ารายละเอียดนักศึกษา (student-plo) สำหรับ hierarchy รายวิชา -> YLO (รายปี) ->
                 PLO เรียก _build_ylo_requirements / _student_achieved_ylo / _year_courses ชุดเดียวกับ
