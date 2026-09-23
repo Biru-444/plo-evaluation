@@ -59,7 +59,6 @@ production ทำให้ endpoint ที่ SELECT คอลัมน์นี
 (คอลัมน์ที่ยังอยู่ใน DB จริงแต่โมเดลลบไปแล้ว ไม่ถูกรายงานเป็น gap) migration ที่ DROP COLUMN จึงต้องรันเอง
 ตามขั้นตอน 1 เสมอ จะพึ่งตาข่ายข้อ 3 ไม่ได้เลยสำหรับกรณีนี้**
 
-**Pending บน production ณ ตอนนี้**: `scripts/migrate_drop_student_current_year_level.py` (ลบ
-`student.current_year_level` — เปลี่ยนไปคำนวณสดจาก `cohort_year` แทน ดู
-`app/services/year_level.py`) รันบน local dev แล้ว ยังไม่รันบน production — รอ production reset
-(ผู้ใช้จะรันเอง)
+**ตัวอย่างล่าสุด**: `scripts/migrate_drop_student_current_year_level.py` (ลบ `student.current_year_level`
+— เปลี่ยนไปคำนวณสดจาก `cohort_year` แทน ดู `app/services/year_level.py`) รันบน local dev และ production
+แล้วทั้งคู่ (2026-09-23) — ยืนยันแล้วว่าคอลัมน์หายจริงและ `check_schema.py` รายงาน 0 gap บน production
