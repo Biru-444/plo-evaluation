@@ -6,6 +6,14 @@ Contrast with curriculum-level endpoints (PLO/YLO achievement dashboards), which
 authenticated admin/instructor on purpose - see the "สิทธิ์" docstring lines added to each endpoint
 in app/routes/plo_calculation.py and app/routes/ylo_calculation.py for the reasoning.
 
+2026-09 follow-up audit: closed the remaining gap in the same "course-level = ownership-checked"
+policy - GET /assessment-items (list + /{id}), GET /item-clo (list + /{id}), GET /course-offerings
+(list + /{id}), and POST/PUT /student-scores had NO ownership check at all before this. Added
+matching tests below (TestAssessmentItemsRead, TestStudentScoreWrite, TestItemCLORead,
+TestCourseOfferingsRead) plus a bonus check on POST /student-scores that the student is actually
+enrolled in the score's offering (production had 0 student_score rows at audit time, confirmed via
+read-only SELECT, so this couldn't break any existing data).
+
 make_client fixture is the same pattern as test_clo_plo_mapping.py's - conftest.py's `client` fixture
 is hardcoded to admin_user, so ownership checks need a way to impersonate a specific non-admin user.
 """
@@ -274,6 +282,237 @@ class TestEnrollments:
         enrollment = db_session.query(Enrollment).filter(Enrollment.student_id == fx["student"].id).first()
         db_session.commit()
         resp = make_client(fx["other"]).get(f"/enrollments/{enrollment.id}")
+        assert resp.status_code == 403
+
+
+class TestAssessmentItemsRead:
+    """GET /assessment-items (list + /{id}) - เดิมไม่เช็คสิทธิ์เลย (2026-09 audit) แก้ให้เหมือน
+    create/update/delete ในไฟล์เดียวกัน (admin ผ่านหมด, instructor เฉพาะ offering ตัวเอง)"""
+
+    def test_owner_instructor_can_list_by_offering(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["owner"]).get(f"/assessment-items?offering_id={fx['offering'].id}")
+        assert resp.status_code == 200
+
+    def test_admin_can_list_by_offering(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = client.get(f"/assessment-items?offering_id={fx['offering'].id}")
+        assert resp.status_code == 200
+
+    def test_non_owner_instructor_gets_403_by_offering(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get(f"/assessment-items?offering_id={fx['offering'].id}")
+        assert resp.status_code == 403
+
+    def test_non_owner_instructor_without_offering_sees_only_own(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get("/assessment-items")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_owner_instructor_get_single_item(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["owner"]).get(f"/assessment-items/{fx['item'].id}")
+        assert resp.status_code == 200
+
+    def test_admin_get_single_item(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = client.get(f"/assessment-items/{fx['item'].id}")
+        assert resp.status_code == 200
+
+    def test_non_owner_instructor_get_single_item_gets_403(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get(f"/assessment-items/{fx['item'].id}")
+        assert resp.status_code == 403
+
+
+class TestStudentScoreWrite:
+    """POST/PUT /student-scores - เดิมไม่เช็คสิทธิ์เลย (ช่องโหว่หลักที่พบใน 2026-09 audit) แก้ให้เช็ค
+    ownership ผ่าน item_id -> offering เหมือน endpoint อื่น บวกเช็คนักศึกษาต้องลงทะเบียน offering นั้นจริง
+    ก่อนบันทึกคะแนน (bonus - กันกรอกผิดวิชา)"""
+
+    def test_owner_instructor_can_create_score(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        item2 = AssessmentItem(offering_id=fx["offering"].id, name="quiz2", type="quiz", total_score=50.0)
+        db_session.add(item2)
+        db_session.commit()
+        resp = make_client(fx["owner"]).post(
+            "/student-scores",
+            json={"item_id": item2.id, "student_id": fx["student"].id, "score_obtained": 40},
+        )
+        assert resp.status_code == 201
+
+    def test_admin_can_create_score(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        item2 = AssessmentItem(offering_id=fx["offering"].id, name="quiz2", type="quiz", total_score=50.0)
+        db_session.add(item2)
+        db_session.commit()
+        resp = client.post(
+            "/student-scores",
+            json={"item_id": item2.id, "student_id": fx["student"].id, "score_obtained": 40},
+        )
+        assert resp.status_code == 201
+
+    def test_non_owner_instructor_create_score_gets_403(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        item2 = AssessmentItem(offering_id=fx["offering"].id, name="quiz2", type="quiz", total_score=50.0)
+        db_session.add(item2)
+        db_session.commit()
+        resp = make_client(fx["other"]).post(
+            "/student-scores",
+            json={"item_id": item2.id, "student_id": fx["student"].id, "score_obtained": 40},
+        )
+        assert resp.status_code == 403
+
+    def test_create_score_for_unenrolled_student_returns_400(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        item2 = AssessmentItem(offering_id=fx["offering"].id, name="quiz2", type="quiz", total_score=50.0)
+        unenrolled = Student(
+            id="SATEST03", curriculum_id=fx["curriculum"].id, first_name="ไม่ได้ลง", last_name="ทะเบียน",
+            cohort_year=69,
+        )
+        db_session.add_all([item2, unenrolled])
+        db_session.commit()
+        resp = make_client(fx["owner"]).post(
+            "/student-scores",
+            json={"item_id": item2.id, "student_id": unenrolled.id, "score_obtained": 10},
+        )
+        assert resp.status_code == 400
+
+    def test_owner_instructor_can_update_score(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        score = (
+            db_session.query(StudentScore)
+            .filter(StudentScore.item_id == fx["item"].id, StudentScore.student_id == fx["student"].id)
+            .first()
+        )
+        db_session.commit()
+        resp = make_client(fx["owner"]).put(f"/student-scores/{score.id}", json={"score_obtained": 90})
+        assert resp.status_code == 200
+
+    def test_admin_can_update_score(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        score = (
+            db_session.query(StudentScore)
+            .filter(StudentScore.item_id == fx["item"].id, StudentScore.student_id == fx["student"].id)
+            .first()
+        )
+        db_session.commit()
+        resp = client.put(f"/student-scores/{score.id}", json={"score_obtained": 90})
+        assert resp.status_code == 200
+
+    def test_non_owner_instructor_update_score_gets_403(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        score = (
+            db_session.query(StudentScore)
+            .filter(StudentScore.item_id == fx["item"].id, StudentScore.student_id == fx["student"].id)
+            .first()
+        )
+        db_session.commit()
+        resp = make_client(fx["other"]).put(f"/student-scores/{score.id}", json={"score_obtained": 90})
+        assert resp.status_code == 403
+
+
+class TestItemCLORead:
+    """GET /item-clo (list + /{id}) - เดิมไม่เช็คสิทธิ์เลย (2026-09 audit)"""
+
+    def test_owner_instructor_can_list_by_item(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["owner"]).get(f"/item-clo?item_id={fx['item'].id}")
+        assert resp.status_code == 200
+
+    def test_admin_can_list_by_item(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = client.get(f"/item-clo?item_id={fx['item'].id}")
+        assert resp.status_code == 200
+
+    def test_non_owner_instructor_gets_403_by_item(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get(f"/item-clo?item_id={fx['item'].id}")
+        assert resp.status_code == 403
+
+    def test_non_owner_instructor_without_item_sees_only_own(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get("/item-clo")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_owner_instructor_get_single_mapping(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        mapping = db_session.query(ItemCLO).filter(ItemCLO.item_id == fx["item"].id).first()
+        db_session.commit()
+        resp = make_client(fx["owner"]).get(f"/item-clo/{mapping.id}")
+        assert resp.status_code == 200
+
+    def test_non_owner_instructor_get_single_mapping_gets_403(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        mapping = db_session.query(ItemCLO).filter(ItemCLO.item_id == fx["item"].id).first()
+        db_session.commit()
+        resp = make_client(fx["other"]).get(f"/item-clo/{mapping.id}")
+        assert resp.status_code == 403
+
+
+class TestCourseOfferingsRead:
+    """GET /course-offerings (list + /{id}) - เดิมไม่เช็คสิทธิ์เลย (2026-09 audit) create/update/delete
+    ยังเป็น admin เท่านั้นเหมือนเดิม (ไม่แตะ)"""
+
+    def test_owner_instructor_list_unfiltered_sees_only_own(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["owner"]).get("/course-offerings")
+        assert resp.status_code == 200
+        ids = [o["id"] for o in resp.json()]
+        assert fx["offering"].id in ids
+
+    def test_other_instructor_list_unfiltered_does_not_see_it(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get("/course-offerings")
+        assert resp.status_code == 200
+        ids = [o["id"] for o in resp.json()]
+        assert fx["offering"].id not in ids
+
+    def test_instructor_requesting_other_instructor_id_gets_403(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get(f"/course-offerings?instructor_id={fx['owner'].id}")
+        assert resp.status_code == 403
+
+    def test_admin_list_sees_all(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = client.get("/course-offerings")
+        assert resp.status_code == 200
+        ids = [o["id"] for o in resp.json()]
+        assert fx["offering"].id in ids
+
+    def test_owner_instructor_get_single_offering(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["owner"]).get(f"/course-offerings/{fx['offering'].id}")
+        assert resp.status_code == 200
+
+    def test_admin_get_single_offering(self, client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = client.get(f"/course-offerings/{fx['offering'].id}")
+        assert resp.status_code == 200
+
+    def test_non_owner_instructor_get_single_offering_gets_403(self, make_client, db_session):
+        fx = _make_fixtures(db_session)
+        db_session.commit()
+        resp = make_client(fx["other"]).get(f"/course-offerings/{fx['offering'].id}")
         assert resp.status_code == 403
 
 

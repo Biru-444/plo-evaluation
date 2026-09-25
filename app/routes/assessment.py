@@ -2,12 +2,17 @@
 ทำอะไร : CRUD สำหรับ assessment_item (ชิ้นงาน/ข้อสอบ) และ student_score (คะแนนดิบของนักศึกษาแต่ละคน)
          — ข้อมูลดิบที่สุดที่ทุกสูตรคำนวณ CLO/PLO/YLO ในระบบนี้อ่านย้อนขึ้นมาจากตารางเหล่านี้
 
-เชื่อมกับ : create/update assessment_item และ student_score เช็คสิทธิ์ความเป็นเจ้าของวิชาเหมือน clo.py/
-            item_clo.py (instructor แก้ได้เฉพาะ offering ที่ตัวเองสอน) — create/update student_score
-            เช็คว่าคะแนนที่กรอกไม่เกินคะแนนเต็มของชิ้นงานนั้นเสมอ (400 ถ้าเกิน)
+เชื่อมกับ : ทุก endpoint (รวม GET list/get-by-id ด้วย - แก้ 2026-09 หลังพบว่าเดิมไม่เช็คเลย) เช็คสิทธิ์
+            ความเป็นเจ้าของวิชาเหมือน clo.py/item_clo.py (admin ผ่านหมด, instructor แก้/ดูได้เฉพาะ
+            offering ที่ตัวเองสอน) — GET list ที่ไม่ระบุ offering_id กรองใน query เหลือเฉพาะ offering
+            ตัวเอง (ไม่ใช่ query ทั้งหมดแล้วกรองทีหลัง) — create/update student_score เช็คว่าคะแนนที่
+            กรอกไม่เกินคะแนนเต็มของชิ้นงานนั้นเสมอ (400 ถ้าเกิน) และ create ต้องเช็คด้วยว่านักศึกษาคนนั้น
+            ลงทะเบียน offering ของชิ้นงานนี้ไว้จริง (400 ถ้าไม่ได้ลงทะเบียน - กันกรอกผิดวิชาโดยไม่ตั้งใจ)
 
 ถ้าแก้ : ไม่มี endpoint ลบ student_score โดยตรง (ลบทางอ้อมได้ผ่านการลบ assessment_item ซึ่ง cascade
-         ลบคะแนนที่ผูกอยู่ไปด้วย)
+         ลบคะแนนที่ผูกอยู่ไปด้วย) — StudentScoreUpdateSchema/AssessmentItemUpdateSchema ไม่มี field ที่
+         ย้าย record ไป offering อื่นได้ (ไม่มี item_id/offering_id ให้แก้) จึงไม่ต้องเช็ค "offering
+         ปลายทาง" แยกต่างหากตอน PUT
 """
 from __future__ import annotations
 
@@ -17,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import AssessmentItem, CourseOffering, StudentScore, User
+from app.models import AssessmentItem, CourseOffering, Enrollment, StudentScore, User
 from app.routes.enrollment import _require_offering_ownership
 from app.schemas import (
     AssessmentCreateSchema,
@@ -32,20 +37,29 @@ from app.schemas import (
 router = APIRouter(tags=["Assessment"])
 
 
-# คืนรายการชิ้นงานทั้งหมด กรองตาม offering_id ได้
+# คืนรายการชิ้นงานทั้งหมด กรองตาม offering_id ได้ — สิทธิ์เหมือน endpoint อื่นในไฟล์นี้ (admin ผ่านหมด,
+# instructor จำกัดเฉพาะ offering ตัวเอง) ระบุ offering_id ของคนอื่น -> 403, ไม่ระบุเลย -> กรองใน query
+# เหลือเฉพาะ offering ตัวเอง (ไม่ใช่กรองหลังดึงมาทั้งหมด)
 @router.get("/assessment-items", response_model=list[AssessmentItemSchema])
 def list_assessment_items(
     offering_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if offering_id is not None:
+        _require_offering_ownership(db, offering_id, current_user)
+
     query = db.query(AssessmentItem)
     if offering_id is not None:
         query = query.filter(AssessmentItem.offering_id == offering_id)
+    elif current_user.role != "admin":
+        query = query.join(CourseOffering, CourseOffering.id == AssessmentItem.offering_id).filter(
+            CourseOffering.instructor_id == current_user.id
+        )
     return query.order_by(AssessmentItem.id).all()
 
 
-# คืนชิ้นงานรายตัวตาม id
+# คืนชิ้นงานรายตัวตาม id — สิทธิ์เหมือน list_assessment_items(offering_id=...) (403 ถ้าเป็นอาจารย์คนอื่น)
 @router.get("/assessment-items/{item_id}", response_model=AssessmentItemSchema)
 def get_assessment_item(
     item_id: int,
@@ -55,6 +69,8 @@ def get_assessment_item(
     item = db.get(AssessmentItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Assessment item not found")
+    if current_user.role != "admin" and item.offering.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     return item
 
 
@@ -177,6 +193,15 @@ def list_student_scores(
 
 # บันทึกคะแนนของนักศึกษา 1 คนต่อชิ้นงาน 1 ชิ้น — 400 ถ้าคะแนนเกินคะแนนเต็มของชิ้นงานนั้น 409 ถ้ามี
 # คะแนนของคนนี้/ชิ้นงานนี้อยู่แล้ว (ต้องใช้ PUT แก้แทน ไม่ใช่ POST ซ้ำ)
+#
+# สิทธิ์ (course-level score data - PDPA) : admin ผ่านหมด — instructor เช็คผ่าน item_id -> offering
+# เท่านั้น (student_score ไม่มีทาง "ชี้ offering" อีกทางแยกต่างหาก - item_id เป็นทางเดียวที่บอกว่าเป็น
+# offering ไหน) 403 ถ้าไม่ใช่เจ้าของ offering ของชิ้นงานนี้
+#
+# เช็คเพิ่ม (นักศึกษาต้องลงทะเบียนวิชานี้จริงก่อนมีคะแนน) : กันข้อมูลเพี้ยน/กรอกผิดวิชาโดยไม่ตั้งใจ ยืนยัน
+# แล้ว (2026-09) ว่า production มี student_score 0 แถวตอนนี้ ไม่มีข้อมูลเก่าที่จะชนเงื่อนไขนี้ และ
+# ScoresPanel.jsx (ทางเดียวที่ frontend เรียก endpoint นี้) ดึงรายชื่อจาก listEnrollments(offeringId)
+# เสมออยู่แล้ว จึงไม่กระทบ flow ปกติ
 @router.post("/student-scores", response_model=StudentScoreSchema, status_code=201)
 def create_student_score(
     payload: StudentScoreCreateSchema,
@@ -186,10 +211,25 @@ def create_student_score(
     item = db.get(AssessmentItem, payload.item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Assessment item not found")
+    if current_user.role != "admin" and item.offering.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     if payload.score_obtained > item.total_score:
         raise HTTPException(
             status_code=400,
             detail=f"คะแนนที่กรอก ({payload.score_obtained}) เกินคะแนนเต็มของชิ้นงานนี้ (เต็ม {item.total_score})",
+        )
+    enrolled = (
+        db.query(Enrollment)
+        .filter(
+            Enrollment.offering_id == item.offering_id,
+            Enrollment.student_id == payload.student_id,
+        )
+        .first()
+    )
+    if enrolled is None:
+        raise HTTPException(
+            status_code=400,
+            detail="นักศึกษาคนนี้ยังไม่ได้ลงทะเบียนในวิชานี้ ลงทะเบียนก่อนถึงจะบันทึกคะแนนได้",
         )
 
     score = StudentScore(**payload.model_dump())
@@ -206,7 +246,10 @@ def create_student_score(
     return score
 
 
-# แก้ไขคะแนนที่บันทึกไว้แล้ว — 400 ถ้าคะแนนใหม่เกินคะแนนเต็มของชิ้นงานนั้นเช่นเดียวกับตอนสร้าง
+# แก้ไขคะแนนที่บันทึกไว้แล้ว — 400 ถ้าคะแนนใหม่เกินคะแนนเต็มของชิ้นงานนั้นเช่นเดียวกับตอนสร้าง สิทธิ์
+# เหมือน create_student_score (admin ผ่านหมด, instructor เฉพาะ offering ตัวเอง ผ่าน score.item.offering)
+# — StudentScoreUpdateSchema มีแค่ score_obtained (ไม่มี item_id/student_id ให้แก้) จึงไม่มีทางย้าย
+# record ไป offering อื่นผ่าน endpoint นี้ได้ ไม่ต้องเช็ค "offering ปลายทาง" แยกต่างหาก
 @router.put("/student-scores/{score_id}", response_model=StudentScoreSchema)
 def update_student_score(
     score_id: int,
@@ -217,6 +260,8 @@ def update_student_score(
     score = db.get(StudentScore, score_id)
     if score is None:
         raise HTTPException(status_code=404, detail="Student score not found")
+    if current_user.role != "admin" and score.item.offering.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     if payload.score_obtained > score.item.total_score:
         raise HTTPException(
             status_code=400,

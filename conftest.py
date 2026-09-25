@@ -22,7 +22,17 @@ if not _real_database_url:
         "DATABASE_URL is not set (check .env - see .env.example) - needed to derive the test database URL"
     )
 _base_url, _, _db_name = _real_database_url.rpartition("/")
-os.environ["DATABASE_URL"] = f"{_base_url}/{_db_name}_test"
+# Idempotent: ถ้า .env ใส่ชื่อ db ที่ลงท้าย "_test" มาให้ตรงๆ อยู่แล้ว ไม่ต้องต่อท้ายซ้ำอีกชั้น (กันเผลอ
+# กลายเป็น "..._test_test" ซึ่งไม่มีฐานข้อมูลจริงรองรับ)
+_test_db_name = _db_name if _db_name.endswith("_test") else f"{_db_name}_test"
+os.environ["DATABASE_URL"] = f"{_base_url}/{_test_db_name}"
+# Hard safety guard: ห้าม test session ใดๆ ต่อฐานข้อมูลที่ไม่ได้ลงท้าย "_test" เด็ดขาด (กัน DATABASE_URL
+# ผิดพลาด/แก้ logic ด้านบนพลาดแล้วชี้ไปฐานข้อมูลจริงโดยไม่ตั้งใจ) - print แค่ชื่อ database ไม่ print
+# connection string เต็ม (มี credential อยู่ในนั้น)
+print(f"[conftest] pytest จะต่อฐานข้อมูลชื่อ: {_test_db_name!r}")
+assert _test_db_name.endswith("_test"), (
+    f"Refusing to run tests: derived database name {_test_db_name!r} does not end with '_test'"
+)
 
 import pytest
 from fastapi.testclient import TestClient

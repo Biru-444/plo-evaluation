@@ -1,7 +1,10 @@
 """
 ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course_offering (การเปิดสอนจริง)
 
-ถ้าแก้ : create/update/delete เฉพาะ admin
+เชื่อมกับ : create/update/delete เฉพาะ admin (ไม่เปลี่ยน) — GET list/get-by-id (2026-09 แก้) admin เห็น
+            ทุก offering เหมือนเดิม, instructor เห็นเฉพาะ offering ที่ตัวเองสอน (ระบุ instructor_id เป็น
+            คนอื่น -> 403, ไม่ระบุเลย -> กรองใน query เหลือเฉพาะของตัวเอง) - เดิมไม่เช็คเลย ใครก็ดูชื่อ
+            ผู้สอน/วิชา/เทอมของทุก offering ในระบบได้
 """
 from __future__ import annotations
 
@@ -21,7 +24,8 @@ from app.schemas import (
 router = APIRouter(prefix="/course-offerings", tags=["Course Offerings"])
 
 
-# คืนรายการ offering ทั้งหมด กรองตาม course_id / instructor_id ได้
+# คืนรายการ offering ทั้งหมด กรองตาม course_id / instructor_id ได้ — instructor ระบุ instructor_id เป็น
+# คนอื่นไม่ได้ (403) ไม่ระบุเลย = กรองในคิวรีเหลือเฉพาะ offering ของตัวเอง (ไม่ใช่ดึงมาทั้งหมดแล้วกรองทีหลัง)
 @router.get("", response_model=list[CourseOfferingSchema])
 def list_course_offerings(
     course_id: int | None = None,
@@ -29,6 +33,11 @@ def list_course_offerings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if current_user.role != "admin":
+        if instructor_id is not None and instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
+        instructor_id = current_user.id
+
     query = db.query(CourseOffering)
     if course_id is not None:
         query = query.filter(CourseOffering.course_id == course_id)
@@ -37,7 +46,7 @@ def list_course_offerings(
     return query.order_by(CourseOffering.id).all()
 
 
-# คืน offering รายตัวตาม id
+# คืน offering รายตัวตาม id — instructor ดูได้เฉพาะ offering ที่ตัวเองสอน (403 ถ้าเป็นคนอื่น)
 @router.get("/{offering_id}", response_model=CourseOfferingSchema)
 def get_course_offering(
     offering_id: int,
@@ -47,6 +56,8 @@ def get_course_offering(
     offering = db.get(CourseOffering, offering_id)
     if offering is None:
         raise HTTPException(status_code=404, detail="Course offering not found")
+    if current_user.role != "admin" and offering.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     return offering
 
 

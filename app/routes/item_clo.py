@@ -3,7 +3,8 @@
          หนึ่งข้อ ต้องไม่เกิน 100%" ในชั้น route (ไม่ใช่ constraint ระดับฐานข้อมูล) ทุกครั้งที่สร้าง/แก้
 
 เชื่อมกับ : weight_percent ที่ผูกไว้ที่นี่คือสิ่งที่ _clo_mastery_for_student ใน plo_calculation.py
-            ใช้ถ่วงน้ำหนักคำนวณ mastery ของ CLO — instructor แก้ได้เฉพาะ mapping ของวิชาที่ตัวเองสอนอยู่
+            ใช้ถ่วงน้ำหนักคำนวณ mastery ของ CLO — instructor ดู/แก้ได้เฉพาะ mapping ของวิชาที่ตัวเองสอนอยู่
+            เท่านั้น ทุก endpoint รวม GET list/get-by-id ด้วย (แก้ 2026-09 หลังพบว่าเดิม GET ไม่เช็คเลย)
 
 ถ้าแก้ : ถ้าลบการเช็ค 100% ออก น้ำหนักรวมเกิน 100% ได้ ซึ่งจะทำให้สูตรถ่วงน้ำหนัก mastery
          (weighted_sum / weight_total) ให้ผลลัพธ์ผิดเพี้ยนไปจากที่ตั้งใจ (ค่าเฉลี่ยถ่วงน้ำหนักยังคง
@@ -42,20 +43,35 @@ def _other_mappings_weight_sum(db: Session, clo_id: int, exclude_item_clo_id: in
     return query.scalar()
 
 
-# คืนรายการ mapping ทั้งหมด กรองตาม item_id ได้
+# คืนรายการ mapping ทั้งหมด กรองตาม item_id ได้ — สิทธิ์เหมือน create/update/delete ในไฟล์นี้ (admin
+# ผ่านหมด, instructor เฉพาะ offering ตัวเอง) - ระบุ item_id ของชิ้นงานวิชาอื่น -> 403, ไม่ระบุเลย ->
+# กรองใน query เหลือเฉพาะ mapping ของ offering ตัวเอง (ไม่ใช่กรองหลังดึงมาทั้งหมด)
 @router.get("", response_model=list[ItemCLOSchema])
 def list_item_clo(
     item_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if item_id is not None:
+        item = db.get(AssessmentItem, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Assessment item not found")
+        if current_user.role != "admin" and item.offering.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
+
     query = db.query(ItemCLO)
     if item_id is not None:
         query = query.filter(ItemCLO.item_id == item_id)
+    elif current_user.role != "admin":
+        query = (
+            query.join(AssessmentItem, AssessmentItem.id == ItemCLO.item_id)
+            .join(CourseOffering, CourseOffering.id == AssessmentItem.offering_id)
+            .filter(CourseOffering.instructor_id == current_user.id)
+        )
     return query.order_by(ItemCLO.id).all()
 
 
-# คืน mapping รายตัวตาม id
+# คืน mapping รายตัวตาม id — สิทธิ์เหมือน list_item_clo(item_id=...) (403 ถ้าเป็นอาจารย์คนอื่น)
 @router.get("/{item_clo_id}", response_model=ItemCLOSchema)
 def get_item_clo(
     item_clo_id: int,
@@ -65,6 +81,8 @@ def get_item_clo(
     item_clo = db.get(ItemCLO, item_clo_id)
     if item_clo is None:
         raise HTTPException(status_code=404, detail="Item-CLO mapping not found")
+    if current_user.role != "admin" and item_clo.item.offering.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
     return item_clo
 
 
