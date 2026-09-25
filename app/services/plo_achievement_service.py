@@ -622,6 +622,7 @@ def compute_cohort_plo_achievement(
                     achieved_student_count=0,
                     achieved_rate_percent=None,
                     coverage_percent=0.0,
+                    has_clo_mapping=plo.id in qualifying_plo_ids,
                 )
                 for plo in plos
             ],
@@ -675,6 +676,7 @@ def compute_cohort_plo_achievement(
                 achieved_student_count=achieved_count,
                 achieved_rate_percent=achieved_rate_percent,
                 coverage_percent=coverage_percent,
+                has_clo_mapping=plo.id in qualifying_plo_ids,
             )
         )
 

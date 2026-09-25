@@ -66,6 +66,12 @@ class PLOCohortSummaryItem(BaseModel):
     achieved_student_count: int
     achieved_rate_percent: float | None
     coverage_percent: float = 0.0
+    # PLO นี้มี CLO ผูกอยู่อย่างน้อย 1 ตัวผ่าน clo_plo_mapping หรือไม่ (ดู _qualifying_plo_ids ใน
+    # plo_achievement_service.py) - เพิ่มเข้ามา (2026-09) ให้ frontend แยกเหตุผล "ยังไม่มีข้อมูล" ของ PLO
+    # ที่ยังไม่มีข้อมูล ระหว่าง "ยังไม่ผูกกับรายวิชาเลย" (False) กับ "ผูกแล้วแต่ยังไม่มีคะแนน/นักศึกษา"
+    # (True) - default True กันโค้ดเก่าที่ยังไม่รู้จัก field นี้พัง (ไม่ควรมีเหลือ - constructor ทุกจุดใน
+    # compute_cohort_plo_achievement ตั้งค่าจริงเสมอ)
+    has_clo_mapping: bool = True
 
 
 # response หลักของ GET /plo/achievement/cohort — สรุปทั้งหลักสูตร + รายชื่อนักศึกษาทุกคนพร้อมผลบรรลุ
