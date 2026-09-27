@@ -28,13 +28,18 @@ class CLOCreateSchema(BaseModel):
     """`created_by` is not accepted from the client - the route sets it
     from the authenticated admin's user id. `plo_ids` (optional) ผูก CLO นี้
     กับ PLO ที่ระบุผ่าน clo_plo_mapping ในขั้นตอนเดียวกับการสร้าง CLO - ไม่ส่ง = ไม่ผูก
-    (ผูก/ถอดทีหลังได้ผ่าน /clo-plo-mapping ตรงๆ)"""
+    (ผูก/ถอดทีหลังได้ผ่าน /clo-plo-mapping ตรงๆ)
+
+    `domain` บังคับตอนสร้างใหม่ผ่านฟอร์มแอดมิน (หน้า "จัดการ CLO") เสมอ - CLO เก่าที่ยังเป็น
+    NULL อยู่ (สร้างก่อนมีการบังคับ หรือมาจากการนำเข้า มคอ.3 ที่ AI แยกไม่ได้) ไม่ถูกแตะ ต้องแก้ไข
+    ผ่าน CLOUpdateSchema ถึงจะเติมค่าได้"""
 
     model_config = ConfigDict(from_attributes=True)
 
     course_id: int
     code: str
     description: str
+    domain: CLODomain
     # จำนวนเต็มเท่านั้น 0-100
     pass_threshold_percent: int = Field(default=60, ge=0, le=100)
     plo_ids: list[int] | None = None
@@ -49,10 +54,14 @@ class CLOCreateSchema(BaseModel):
 
 class CLOUpdateSchema(BaseModel):
     """`plo_ids` (optional) แทนที่ชุด PLO ที่ CLO นี้ผูกอยู่ทั้งหมดด้วยรายการที่ส่งมา (ส่ง [] = ถอด
-    ออกทั้งหมด, ไม่ส่ง field นี้เลย = ไม่แตะ mapping เดิม)"""
+    ออกทั้งหมด, ไม่ส่ง field นี้เลย = ไม่แตะ mapping เดิม)
+
+    `domain` เป็น optional (ไม่ส่ง = ไม่แตะค่าเดิม) แต่ถ้าส่งมาต้องเป็น 1 ใน 4 ค่าที่กำหนด (บังคับ
+    เลือกจากฟอร์มแอดมิน ใช้เติมให้ CLO เก่าที่ยังเป็น NULL อยู่)"""
 
     model_config = ConfigDict(from_attributes=True)
 
     description: str | None = None
+    domain: CLODomain | None = None
     pass_threshold_percent: int | None = Field(default=None, ge=0, le=100)
     plo_ids: list[int] | None = None

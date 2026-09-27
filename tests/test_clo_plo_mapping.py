@@ -289,6 +289,7 @@ def test_create_clo_with_plo_ids_maps_in_one_request(client, db_session, admin_u
             "course_id": fx["course"].id,
             "code": "CLO2",
             "description": "ทดสอบ CLO2",
+            "domain": "knowledge",
             "plo_ids": [fx["plo_a"].id, fx["plo_b"].id],
         },
     )
