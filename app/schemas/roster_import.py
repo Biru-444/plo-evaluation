@@ -58,3 +58,8 @@ class RosterImportResponse(BaseModel):
     summary: dict[str, int] = {}
     new_instructor_credentials: list[dict] = []
     errors: list[str] = []
+    # ใช้เฉพาะเส้นทาง POST /course-offerings/{id}/roster-import (นำเข้าเข้า offering ที่ระบุตรงๆ จากหน้า
+    # อาจารย์) - ไม่ใช่ None เมื่อวิชา/section/ปีการศึกษา/ภาคเรียนในไฟล์ไม่ตรงกับ offering เป้าหมาย ไม่บล็อก
+    # การนำเข้า แค่เตือน (ดู app/routes/roster_import.py::_apply_roster_import_to_offering) - เส้นทาง
+    # /roster-import เดิม (admin) ไม่เคยตั้งค่านี้เลย เป็น None เสมอ
+    course_mismatch_warning: str | None = None

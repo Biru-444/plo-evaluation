@@ -590,6 +590,195 @@ def _apply_roster_import(
     )
 
 
+# ทำอะไร : เหมือน _apply_roster_import แต่ลงทะเบียนเข้า offering ที่ระบุตรงๆ (offering_id) เสมอ แทนที่
+# จะหา/สร้าง course_offering จากวิชา/section/ปีการศึกษาในไฟล์เอง - ใช้จากหน้าอาจารย์ (POST
+# /course-offerings/{id}/roster-import ใน app/routes/course_offering.py) ที่สิทธิ์เช็คแล้วว่าเป็นเจ้าของ
+# offering นี้จริงก่อนเรียกมาถึงนี่
+#
+# ต่างจาก _apply_roster_import 4 อย่างตามที่ผู้ใช้ระบุ (2026-09-28):
+# 1. ไม่หา/สร้าง Course หรือ CourseOffering เลย - ใช้ offering ที่ส่งมาตรงๆ เสมอ (ห้ามสร้างวิชา/offering
+#    ใหม่จากฝั่งอาจารย์)
+# 2. ไม่แตะผู้สอนเลย (ไม่อ่าน parsed.instructor_names ไม่สร้าง/จับคู่บัญชีอาจารย์ใดๆ) - ห้ามเปลี่ยนผู้สอน
+#    ตามชื่อในไฟล์
+# 3. curriculum ของนักศึกษาใหม่ = course.curriculum_id ของ offering เสมอ (ไม่ต้องรับ curriculum_id เป็น
+#    parameter แยกเหมือน _apply_roster_import เพราะรู้แน่นอนอยู่แล้วจาก offering ที่ระบุมา)
+# 4. เทียบวิชา/section/ปีการศึกษา/ภาคเรียนในไฟล์กับ offering เป้าหมาย - ไม่ตรงกันข้อใดข้อหนึ่งไม่บล็อก แค่
+#    เติม course_mismatch_warning ให้ (ผู้ใช้ยืนยันแล้วว่าเช็คครบทั้ง 4 อย่าง ไม่ใช่แค่วิชา/section)
+def _apply_roster_import_to_offering(
+    db: Session, parsed: ParsedRoster, commit: bool, offering: CourseOffering
+) -> RosterImportResponse:
+    course = db.get(Course, offering.course_id)  # รับประกันว่ามีอยู่จริงเสมอ (FK NOT NULL)
+    target_curriculum_id = course.curriculum_id
+    # อ่านค่าที่ต้องใช้ตอนสร้าง response เก็บไว้ในตัวแปรตั้งแต่ตอนนี้ (ก่อน db.rollback() ด้านล่างตอน
+    # dry-run) - ห้ามอ่าน attribute ของ course/offering หลัง rollback อีก เพราะ ORM object อาจถูก expire
+    # จนอ่านค่าไม่ได้ (เจอจริงตอนเขียน test แบบ dry-run + มีวิชาอยู่แล้ว)
+    response_course_code = course.course_code
+    response_course_name_th = course.name_th
+    response_offering_id = offering.id
+    response_academic_year = offering.academic_year
+    response_semester = offering.semester
+    response_section = offering.section
+
+    course_mismatch_warning: str | None = None
+    if (
+        parsed.course_code != course.course_code
+        or parsed.section != offering.section
+        or parsed.academic_year != offering.academic_year
+        or parsed.semester != offering.semester
+    ):
+        course_mismatch_warning = (
+            f"ไฟล์นี้เป็นวิชา {parsed.course_code} sec {parsed.section} "
+            f"({parsed.semester}/{parsed.academic_year}) แต่คุณกำลังนำเข้าไปที่ {course.course_code} "
+            f"sec {offering.section} ({offering.semester}/{offering.academic_year}) - ยังนำเข้าได้ตามปกติ "
+            "แต่กรุณาตรวจสอบว่าเลือกไฟล์ถูกวิชาจริง"
+        )
+
+    # --- นักศึกษา --- (logic เดียวกับ _apply_roster_import ทุกประการ แค่ target_curriculum_id รู้แน่นอน
+    # อยู่แล้วเสมอ ไม่มีเคส None)
+    student_rows: list[RosterImportStudentRow] = []
+    to_enroll_ids: list[str] = []
+    counts = {"create": 0, "update_info": 0, "unchanged": 0, "error": 0}
+    for i, (sid, title, first, last) in enumerate(parsed.students, start=1):
+        existing_student = db.get(Student, sid)
+        if existing_student is None:
+            row = RosterImportStudentRow(
+                line_no=i, student_id=sid, title=title, first_name=first, last_name=last, action="create",
+            )
+            counts["create"] += 1
+            if commit:
+                db.add(Student(
+                    id=sid,
+                    curriculum_id=target_curriculum_id,
+                    first_name=first,
+                    last_name=last,
+                    title=title,
+                    section=parsed.section,
+                    cohort_year=parsed.cohort_year if parsed.cohort_year is not None else int(sid[:2]),
+                ))
+            to_enroll_ids.append(sid)
+        elif existing_student.curriculum_id != target_curriculum_id:
+            row = RosterImportStudentRow(
+                line_no=i, student_id=sid, title=title, first_name=first, last_name=last, action="error",
+                detail=(
+                    f"นักศึกษาคนนี้อยู่คนละหลักสูตร (curriculum_id="
+                    f"{existing_student.curriculum_id} ไม่ตรงกับ {target_curriculum_id}) - ข้ามการลงทะเบียนให้ "
+                    "กรุณาตรวจสอบด้วยตนเอง"
+                ),
+            )
+            counts["error"] += 1
+        else:
+            name_changed = (
+                existing_student.first_name != first
+                or existing_student.last_name != last
+                or (existing_student.title or None) != (title or None)
+            )
+            section_changed = existing_student.section != parsed.section
+            if name_changed or section_changed:
+                detail_parts = []
+                if name_changed:
+                    detail_parts.append(
+                        f"ชื่อเดิมในระบบ: {existing_student.title or ''} {existing_student.first_name} "
+                        f"{existing_student.last_name} -> ในไฟล์: {title or ''} {first} {last}"
+                    )
+                if section_changed:
+                    detail_parts.append(
+                        f"หมู่เดิมในระบบ: {existing_student.section or '(ไม่ระบุ)'} -> ในไฟล์: {parsed.section}"
+                    )
+                row = RosterImportStudentRow(
+                    line_no=i, student_id=sid, title=title, first_name=first, last_name=last,
+                    action="update_info",
+                    detail=" | ".join(detail_parts),
+                )
+                counts["update_info"] += 1
+                if commit:
+                    existing_student.first_name = first
+                    existing_student.last_name = last
+                    existing_student.title = title
+                    existing_student.section = parsed.section
+            else:
+                row = RosterImportStudentRow(
+                    line_no=i, student_id=sid, title=title, first_name=first, last_name=last, action="unchanged",
+                )
+                counts["unchanged"] += 1
+            to_enroll_ids.append(sid)
+        student_rows.append(row)
+
+    if commit:
+        # นักศึกษาใหม่ที่เพิ่ง db.add() ไว้ข้างบนต้อง flush ก่อน bulk insert enrollment ด้านล่าง (เหตุผล
+        # เดียวกับ _apply_roster_import - ดู docstring ของฟังก์ชันนั้น)
+        db.flush()
+
+    # --- ลงทะเบียนเรียน --- offering มีอยู่แน่นอนเสมอ (รับมาเป็น parameter) ต่างจาก _apply_roster_import
+    # ที่ offering อาจยังไม่มีจริงตอน dry-run
+    enrollments_added = 0
+    enrollments_already = 0
+    if to_enroll_ids:
+        already = {
+            r[0]
+            for r in db.query(Enrollment.student_id)
+            .filter(Enrollment.offering_id == offering.id, Enrollment.student_id.in_(to_enroll_ids))
+            .all()
+        }
+        if commit:
+            to_insert = [sid for sid in to_enroll_ids if sid not in already]
+            if to_insert:
+                stmt = (
+                    pg_insert(Enrollment.__table__)
+                    .values([{"student_id": sid, "offering_id": offering.id} for sid in to_insert])
+                    .on_conflict_do_nothing(index_elements=["student_id", "offering_id"])
+                    .returning(Enrollment.__table__.c.student_id)
+                )
+                result = db.execute(stmt)
+                enrollments_added = len(result.fetchall())
+            enrollments_already = len(already)
+        else:
+            enrollments_already = len(already)
+            enrollments_added = len(to_enroll_ids) - len(already)
+
+    if commit:
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409, detail=f"นำเข้าไม่สำเร็จ - ข้อมูลขัดแย้งกันในฐานข้อมูล ({exc.orig})"
+            ) from exc
+    else:
+        db.rollback()
+
+    summary = {
+        "students_total": len(parsed.students),
+        "students_create": counts["create"],
+        "students_update_info": counts["update_info"],
+        "students_unchanged": counts["unchanged"],
+        "students_error": counts["error"],
+        "enrollments_added": enrollments_added,
+        "enrollments_already": enrollments_already,
+    }
+
+    return RosterImportResponse(
+        dry_run=not commit,
+        course_code=response_course_code,
+        course_name_th=response_course_name_th,
+        course_found=True,
+        academic_year=response_academic_year,
+        semester=response_semester,
+        section=response_section,
+        cohort_year=parsed.cohort_year,
+        offering_id=response_offering_id,
+        offering_action="matched_existing",
+        needs_curriculum_id=False,
+        instructors=[],
+        students=student_rows,
+        enrollments_added=enrollments_added,
+        enrollments_already=enrollments_already,
+        summary=summary,
+        new_instructor_credentials=[],
+        errors=[],
+        course_mismatch_warning=course_mismatch_warning,
+    )
+
+
 @router.post("", response_model=RosterImportResponse)
 async def import_roster(
     file: UploadFile = File(...),
