@@ -42,12 +42,19 @@ class RosterImportResponse(BaseModel):
     section: str
     cohort_year: int | None = None
     offering_id: int | None = None
-    # "matched_existing" | "will_create" | "created" | "error" (ไม่พบวิชาในระบบ)
+    # "matched_existing" | "will_create" | "created" | "skipped_no_course" (ไม่พบวิชาในระบบ - นำเข้า
+    # เฉพาะรายชื่อนักศึกษา ไม่สร้างวิชา/การเปิดสอน/ลงทะเบียนให้ - ดู needs_curriculum_id ด้านล่าง)
     offering_action: str
+    # true = ไม่พบวิชาในระบบ และยังไม่มี/ไม่ได้ระบุ curriculum_id ที่ถูกต้องมาด้วย - frontend ต้องให้ผู้ใช้
+    # เลือกหลักสูตรก่อนถึงจะกด "ยืนยันนำเข้าจริง" ได้ (ส่ง curriculum_id กลับมาในคำขอถัดไป ทั้ง dry_run
+    # และ commit)
+    needs_curriculum_id: bool = False
     instructors: list[RosterImportInstructor] = []
     students: list[RosterImportStudentRow] = []
     enrollments_added: int = 0
     enrollments_already: int = 0
+    # summary keys เพิ่มเติมตอน offering_action == "skipped_no_course":
+    # "enrollments_skipped_no_course" (จำนวนนักศึกษาที่ไม่ได้ลงทะเบียนเพราะไม่มีวิชาให้ลงทะเบียน)
     summary: dict[str, int] = {}
     new_instructor_credentials: list[dict] = []
     errors: list[str] = []

@@ -17,7 +17,11 @@
 - ถ้าชื่อผู้สอนในไฟล์ไม่ตรงกับ user ในระบบ ให้สร้างบัญชีอาจารย์จริงให้เลย (username รูปแบบ
   "ajarn<id>" + รหัสผ่านชั่วคราวสุ่ม แสดงครั้งเดียวตอนสร้าง - เหมือน ajarn.somsak/ajarn.suda ที่มีอยู่
   แต่ไม่มีวิธี transliterate ชื่อไทยเป็นอังกฤษได้แม่นยำอัตโนมัติ จึงใช้ id เป็นส่วนต่อท้ายแทน)
-- รายวิชา (Course) ต้องมีอยู่ในระบบก่อนแล้วเท่านั้น (import จะไม่สร้างรายวิชาใหม่) - ถ้าไม่เจอจะแจ้ง error
+- รายวิชา (Course) ต้องมีอยู่ในระบบก่อนแล้วเท่านั้น (import จะไม่สร้างรายวิชาใหม่) - ถ้าไม่เจอ **ไม่ใช่
+  error ที่หยุดทั้งไฟล์อีกต่อไป** (เปลี่ยนตามที่ผู้ใช้ระบุ 2026-09-27) จะนำเข้าเฉพาะรายชื่อนักศึกษา
+  (สร้าง/อัปเดตตามปกติ) ข้ามผู้สอน/course_offering/enrollment ทั้งหมด - ต้องมี `curriculum_id` (form
+  field ใหม่ เลือกเองจากฟอร์ม เพราะปกติได้จาก course.curriculum_id) ก่อนถึงจะ commit ได้จริง (422 ถ้าไม่มี
+  ตอน commit - ดู needs_curriculum_id ใน response และ offering_action == "skipped_no_course")
 
 รองรับ 2 โหมดในการเรียกเดียวกัน ผ่าน form field `dry_run`:
 - `dry_run=true` (ค่าเริ่มต้น): parse + คำนวณผลลัพธ์ที่ *จะ* เกิดขึ้น แต่ rollback ไม่บันทึกจริง
@@ -280,12 +284,21 @@ def parse_roster_xls(filename: str, content: bytes) -> ParsedRoster:
 # (ผู้สอน -> course_offering -> นักศึกษา -> การลงทะเบียน) ว่าแต่ละอย่าง "มีอยู่แล้ว"/"จะสร้างใหม่"/
 # "จะแก้ไข" — commit=False (dry-run) รันตรรกะเดียวกันทั้งหมดแต่ไม่ db.add()/ไม่ db.commit() จริง (แค่
 # คำนวณว่า "จะ" เกิดอะไรขึ้น) commit=True คือบันทึกจริงทุกอย่าง
+#
+# ถ้าไม่พบวิชาในระบบ (course is None): นำเข้าเฉพาะรายชื่อนักศึกษาเท่านั้น (สร้าง/อัปเดตตามปกติ) ข้าม
+# ผู้สอน/course_offering/enrollment ไปทั้งหมด (ไม่มีอะไรให้ผูก) - ต้องรู้ curriculum_id ของนักศึกษาแทนที่
+# จะได้จาก course.curriculum_id ตามปกติ รับจาก parameter `curriculum_id` ที่ผู้ใช้เลือกเองในฟอร์ม (ตรวจว่า
+# มีอยู่จริงก่อนเสมอ - 422 ถ้าไม่มี/ไม่ถูกต้อง ตอน commit=True เท่านั้น dry-run ยังพรีวิวได้แม้ไม่ระบุ
+# curriculum_id มา แค่ข้ามการเช็คหลักสูตรซ้ำของนักศึกษาเดิมไปก่อน - ดู needs_curriculum_id ใน response)
+#
 # เชื่อมกับ : ใช้ pg_insert().on_conflict_do_nothing() บันทึกการลงทะเบียนแบบ bulk เหมือน
 # enrollment.py (กันซ้ำแบบ atomic) — ทุก error ที่ไม่ถึงขั้นทำให้ import ทั้งไฟล์ล้มเหลว (เช่น
 # นักศึกษาคนหนึ่งอยู่คนละหลักสูตร) จะถูกเก็บใน errors/action="error" ต่อแถว ไม่ throw exception ทันที
 # ถ้าแก้ : ต้อง db.flush() นักศึกษาที่เพิ่ง add() ก่อน bulk insert enrollment เสมอ (ดูคอมเมนต์ในโค้ด
 # ด้านล่าง) ไม่งั้นจะชน foreign key constraint เพราะแถว student ยังไม่มีอยู่จริงในตาราง
-def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> RosterImportResponse:
+def _apply_roster_import(
+    db: Session, parsed: ParsedRoster, commit: bool, curriculum_id: int | None = None
+) -> RosterImportResponse:
     errors: list[str] = []
 
     courses = (
@@ -295,35 +308,43 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
         .order_by(Curriculum.is_active.desc(), Course.id)
         .all()
     )
-    if not courses:
+    course = courses[0] if courses else None
+    if course is None:
         errors.append(
-            f"ไม่พบวิชารหัส {parsed.course_code} ในระบบ - ระบบนี้ไม่สร้างรายวิชาใหม่อัตโนมัติ "
-            f"กรุณาสร้างวิชา '{parsed.course_code} {parsed.course_name}' ก่อน แล้วนำเข้าไฟล์นี้ใหม่อีกครั้ง"
+            f"ไม่พบวิชารหัส {parsed.course_code} ในระบบ - ระบบนี้ไม่สร้างรายวิชาใหม่อัตโนมัติ จะนำเข้าเฉพาะ"
+            f"รายชื่อนักศึกษาเท่านั้น (ไม่สร้างวิชา/การเปิดสอน/ลงทะเบียนให้) กรุณาสร้างวิชา "
+            f"'{parsed.course_code} {parsed.course_name}' เองภายหลังแล้วลงทะเบียนนักศึกษาแยกต่างหาก"
         )
-        return RosterImportResponse(
-            dry_run=not commit,
-            course_code=parsed.course_code,
-            course_name_th=parsed.course_name,
-            course_found=False,
-            academic_year=parsed.academic_year,
-            semester=parsed.semester,
-            section=parsed.section,
-            cohort_year=parsed.cohort_year,
-            offering_action="error",
-            errors=errors,
-        )
-    course = courses[0]
-    if len(courses) > 1:
+    elif len(courses) > 1:
         errors.append(
             f"พบวิชารหัส {parsed.course_code} มากกว่า 1 หลักสูตรในระบบ - เลือกหลักสูตร "
             f"'{course.curriculum.name}' (id={course.curriculum_id}) ให้อัตโนมัติเพราะเป็นหลักสูตรที่ active อยู่"
         )
 
-    # --- ผู้สอน ---
+    resolved_curriculum: Curriculum | None = None
+    if course is None:
+        if curriculum_id is not None:
+            resolved_curriculum = db.get(Curriculum, curriculum_id)
+            if resolved_curriculum is None:
+                raise HTTPException(status_code=422, detail="ไม่พบหลักสูตรนี้ในระบบ")
+        elif commit:
+            raise HTTPException(
+                status_code=422,
+                detail="ต้องระบุหลักสูตรของนักศึกษาก่อนนำเข้าจริง (ไม่พบวิชานี้ในระบบ ระบบจึงไม่ทราบว่า"
+                "นักศึกษาอยู่หลักสูตรไหน)",
+            )
+    # curriculum_id ที่จะใช้สร้าง/เทียบนักศึกษาจริง - course.curriculum_id เป็นหลักเสมอถ้ามีวิชา (ห้ามใช้
+    # curriculum_id ที่ผู้ใช้ส่งมาแทนแม้จะส่งมาด้วยก็ตาม - พฤติกรรมตอนมีวิชาต้องเหมือนเดิมทุกประการ) ไม่งั้น
+    # ใช้ curriculum_id ที่ resolve แล้ว (อาจเป็น None ถ้ายังไม่ได้ระบุตอน dry-run)
+    target_curriculum_id = course.curriculum_id if course is not None else (
+        resolved_curriculum.id if resolved_curriculum is not None else None
+    )
+
+    # --- ผู้สอน --- ข้ามทั้งหมดถ้าไม่มีวิชา (ไม่มี course_offering ให้ผูกผู้สอนอยู่ดี)
     instructor_results: list[RosterImportInstructor] = []
     primary_instructor_id: int | None = None
     created_credentials: list[dict] = []
-    for idx, raw_name in enumerate(parsed.instructor_names):
+    for idx, raw_name in enumerate(parsed.instructor_names if course is not None else []):
         title, first, last = split_instructor_name(raw_name)
         existing = db.query(User).filter(User.first_name == first, User.last_name == last).first()
         if existing:
@@ -361,37 +382,42 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
             entry = RosterImportInstructor(full_name=raw_name, title=title, action="will_create")
         instructor_results.append(entry)
 
-    # --- course offering ---
-    offering = (
-        db.query(CourseOffering)
-        .filter_by(
-            course_id=course.id,
-            academic_year=parsed.academic_year,
-            semester=parsed.semester,
-            section=parsed.section,
-        )
-        .first()
-    )
+    # --- course offering --- ข้ามทั้งหมดถ้าไม่มีวิชา (ห้ามสร้าง course_offering ตามที่ผู้ใช้ระบุ)
+    offering = None
     offering_id: int | None
-    if offering:
-        offering_action = "matched_existing"
-        offering_id = offering.id
-    elif commit:
-        offering = CourseOffering(
-            course_id=course.id,
-            instructor_id=primary_instructor_id,
-            cohort_year=parsed.cohort_year,
-            academic_year=parsed.academic_year,
-            semester=parsed.semester,
-            section=parsed.section,
-        )
-        db.add(offering)
-        db.flush()
-        offering_action = "created"
-        offering_id = offering.id
-    else:
-        offering_action = "will_create"
+    if course is None:
+        offering_action = "skipped_no_course"
         offering_id = None
+    else:
+        offering = (
+            db.query(CourseOffering)
+            .filter_by(
+                course_id=course.id,
+                academic_year=parsed.academic_year,
+                semester=parsed.semester,
+                section=parsed.section,
+            )
+            .first()
+        )
+        if offering:
+            offering_action = "matched_existing"
+            offering_id = offering.id
+        elif commit:
+            offering = CourseOffering(
+                course_id=course.id,
+                instructor_id=primary_instructor_id,
+                cohort_year=parsed.cohort_year,
+                academic_year=parsed.academic_year,
+                semester=parsed.semester,
+                section=parsed.section,
+            )
+            db.add(offering)
+            db.flush()
+            offering_action = "created"
+            offering_id = offering.id
+        else:
+            offering_action = "will_create"
+            offering_id = None
 
     # --- นักศึกษา ---
     student_rows: list[RosterImportStudentRow] = []
@@ -405,9 +431,11 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
             )
             counts["create"] += 1
             if commit:
+                # target_curriculum_id รับประกันว่าไม่ใช่ None ตอน commit=True เสมอ (422 ไปแล้วถ้าไม่มีวิชา
+                # และไม่ได้ระบุ curriculum_id มา - ดูเช็คด้านบน)
                 db.add(Student(
                     id=sid,
-                    curriculum_id=course.curriculum_id,
+                    curriculum_id=target_curriculum_id,
                     first_name=first,
                     last_name=last,
                     title=title,
@@ -417,12 +445,12 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
                     # app/services/year_level.py / Student.current_year_level property)
                 ))
             to_enroll_ids.append(sid)
-        elif existing_student.curriculum_id != course.curriculum_id:
+        elif target_curriculum_id is not None and existing_student.curriculum_id != target_curriculum_id:
             row = RosterImportStudentRow(
                 line_no=i, student_id=sid, title=title, first_name=first, last_name=last, action="error",
                 detail=(
-                    f"นักศึกษาคนนี้อยู่คนละหลักสูตรกับวิชานี้ในระบบ (curriculum_id="
-                    f"{existing_student.curriculum_id} ไม่ตรงกับ {course.curriculum_id}) - ข้ามการลงทะเบียนให้ "
+                    f"นักศึกษาคนนี้อยู่คนละหลักสูตร (curriculum_id="
+                    f"{existing_student.curriculum_id} ไม่ตรงกับ {target_curriculum_id}) - ข้ามการลงทะเบียนให้ "
                     "กรุณาตรวจสอบด้วยตนเอง"
                 ),
             )
@@ -473,10 +501,15 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
         # เพราะ student row ยังไม่มีอยู่จริงในตาราง
         db.flush()
 
-    # --- ลงทะเบียนเรียน ---
+    # --- ลงทะเบียนเรียน --- ไม่มีวิชา = ไม่มี offering ให้ลงทะเบียนเลย ไม่ว่าโหมดไหน (เช็ค course is None
+    # ก่อนเสมอ ห้ามปล่อยให้ไหลลงไปเงื่อนไขด้านล่างที่เช็คแค่ offering_id is not None เพราะ commit=True กับ
+    # offering_id=None พร้อมกันไม่เคยเกิดได้มาก่อน (ตอนมีวิชา offering ถูกสร้างเสมอ) จนกระทั่งเคสนี้)
     enrollments_added = 0
     enrollments_already = 0
-    if to_enroll_ids:
+    enrollments_skipped_no_course = 0
+    if course is None:
+        enrollments_skipped_no_course = len(to_enroll_ids)
+    elif to_enroll_ids:
         if commit and offering_id is not None:
             already = {
                 r[0]
@@ -530,6 +563,7 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
         "students_error": counts["error"],
         "enrollments_added": enrollments_added,
         "enrollments_already": enrollments_already,
+        "enrollments_skipped_no_course": enrollments_skipped_no_course,
         "instructors_created": sum(1 for r in instructor_results if r.action == "created"),
         "instructors_will_create": sum(1 for r in instructor_results if r.action == "will_create"),
     }
@@ -537,14 +571,15 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
     return RosterImportResponse(
         dry_run=not commit,
         course_code=parsed.course_code,
-        course_name_th=course.name_th,
-        course_found=True,
+        course_name_th=course.name_th if course is not None else parsed.course_name,
+        course_found=course is not None,
         academic_year=parsed.academic_year,
         semester=parsed.semester,
         section=parsed.section,
         cohort_year=parsed.cohort_year,
         offering_id=offering_id,
         offering_action=offering_action,
+        needs_curriculum_id=course is None and resolved_curriculum is None,
         instructors=instructor_results,
         students=student_rows,
         enrollments_added=enrollments_added,
@@ -559,16 +594,20 @@ def _apply_roster_import(db: Session, parsed: ParsedRoster, commit: bool) -> Ros
 async def import_roster(
     file: UploadFile = File(...),
     dry_run: bool = Form(True),
+    curriculum_id: int | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
     """นำเข้าไฟล์รายชื่อจากมหาวิทยาลัย (.xls/.xlsx) - admin เท่านั้น เพราะ endpoint นี้สร้างบัญชี
     ผู้ใช้ (อาจารย์) ใหม่ในระบบได้ ซึ่งเป็นสิทธิ์ระดับแอดมินทุกจุดในระบบนี้อยู่แล้ว (ดู users.py)
-    เรียกด้วย dry_run=true ก่อนเพื่อดูตัวอย่างผลลัพธ์ แล้วค่อยเรียกซ้ำด้วย dry_run=false เพื่อบันทึกจริง"""
+    เรียกด้วย dry_run=true ก่อนเพื่อดูตัวอย่างผลลัพธ์ แล้วค่อยเรียกซ้ำด้วย dry_run=false เพื่อบันทึกจริง
+
+    `curriculum_id` (optional) จำเป็นเฉพาะตอนไม่พบวิชาในระบบ (ดู needs_curriculum_id ใน response) -
+    ไม่มีผลอะไรเลยถ้าพบวิชา (ใช้ course.curriculum_id เสมอ ไม่ว่าจะส่ง curriculum_id มาด้วยหรือไม่)"""
     content = await file.read()
     try:
         parsed = parse_roster_xls(file.filename or "", content)
     except RosterParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return _apply_roster_import(db, parsed, commit=not dry_run)
+    return _apply_roster_import(db, parsed, commit=not dry_run, curriculum_id=curriculum_id)
