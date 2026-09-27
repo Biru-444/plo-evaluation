@@ -10,7 +10,9 @@
             CLOUpdateSchema) ไม่ผูกก็ยังทำได้ปกติผ่าน POST /clo-plo-mapping แยกทีหลัง - weight_percent
             ของทุกคู่ที่สร้างผ่าน plo_ids เกลี่ยเท่ากันเสมอ (100/len(plo_ids)) เหมือนกับที่
             POST /clo-plo-mapping ทำ (Workstream 3) - คำนวณตรงๆ ที่นี่แทนเรียก
-            _rebalance_clo_weights_evenly เพราะรู้ชุด PLO ทั้งหมดอยู่แล้วในคำขอเดียว ไม่ต้อง query ซ้ำ
+            _rebalance_clo_weights_evenly เพราะรู้ชุด PLO ทั้งหมดอยู่แล้วในคำขอเดียว ไม่ต้อง query ซ้ำ -
+            plo_ids แต่ละตัวต้องอยู่หลักสูตรเดียวกับ CLO นี้ด้วย (422 ถ้าไม่ตรง - ดู
+            app/services/curriculum_match_check.py)
 
 ถ้าแก้ : เกณฑ์ผ่าน (pass_threshold_percent) ที่แก้ผ่าน update_clo กระทบการตัดสิน CLO ผ่าน/ไม่ผ่าน
          ย้อนหลังทั้งหมดทันที (ดู app/models/clo.py)
@@ -25,8 +27,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CLO, CLOPLOMapping, CourseOffering, User
+from app.models import CLO, CLOPLOMapping, CourseOffering, PLO, User
 from app.schemas import CLOCreateSchema, CLOSchema, CLOUpdateSchema
+from app.services.curriculum_match_check import require_same_curriculum
 
 router = APIRouter(prefix="/clo", tags=["CLO"])
 
@@ -88,6 +91,11 @@ def create_clo(
     db.add(clo)
     db.flush()  # ต้องมี clo.id ก่อนสร้างแถว clo_plo_mapping ที่อ้างถึง
     if plo_ids:
+        # เช็คเฉพาะ plo_id ที่มีอยู่จริง - ที่ไม่มีจริงปล่อยให้ IntegrityError ตอน insert ด้านล่างจัดการ
+        for plo_id in plo_ids:
+            plo = db.get(PLO, plo_id)
+            if plo is not None:
+                require_same_curriculum(clo, plo)
         even_weight = _even_weight_for(len(plo_ids))
         for plo_id in plo_ids:
             db.add(CLOPLOMapping(clo_id=clo.id, plo_id=plo_id, weight_percent=even_weight))
@@ -137,6 +145,11 @@ def update_clo(
     if plo_ids_provided:
         db.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == clo_id).delete()
         if plo_ids:
+            # เช็คเฉพาะ plo_id ที่มีอยู่จริง - ที่ไม่มีจริงปล่อยให้ IntegrityError ตอน insert ด้านล่างจัดการ
+            for plo_id in plo_ids:
+                plo = db.get(PLO, plo_id)
+                if plo is not None:
+                    require_same_curriculum(clo, plo)
             even_weight = _even_weight_for(len(plo_ids))
             for plo_id in plo_ids:
                 db.add(CLOPLOMapping(clo_id=clo_id, plo_id=plo_id, weight_percent=even_weight))

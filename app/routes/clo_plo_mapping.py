@@ -10,6 +10,11 @@
          CLOPLOMappingCreateSchema) แก้เองทีหลังได้ผ่าน PUT (ไม่ trigger rebalance ของคู่อื่น - แก้
          เจาะจงค่าเดียวตามที่แอดมินตั้งใจ)
 
+         CLO กับ PLO ต้องอยู่หลักสูตรเดียวกันเท่านั้น (422 ถ้าไม่ตรง - ดู
+         app/services/curriculum_match_check.py เช็คเดียวกันนี้ยังใช้ที่ app/routes/clo.py::create_clo/
+         update_clo ตอนผูกผ่าน plo_ids ด้วย ไม่ต้องเช็คที่ app/routes/course_import.py เพราะ query PLO
+         ที่นั่นกรองด้วย curriculum_id ของคำขอเองอยู่แล้ว ข้ามหลักสูตรไม่ได้โดยโครงสร้าง)
+
 เชื่อมกับ : สิทธิ์เช็คผ่าน CLO.course_id -> CourseOffering.instructor_id แบบเดียวกับ create_clo/
             update_clo/delete_clo ใน app/routes/clo.py (admin แก้ได้ทุกวิชา, อาจารย์แก้ได้เฉพาะวิชาที่
             ตัวเองสอนอยู่จริงเท่านั้น) — ผูก/ถอด/แก้ mapping คือการแก้ไข CLO ของวิชานั้นทางอ้อม จึงใช้
@@ -39,6 +44,7 @@ from app.database import get_db
 from app.models import CLO, CLOPLOMapping, CourseOffering, PLO, User
 from app.schemas import CLOPLOMappingCreateSchema, CLOPLOMappingSchema, CLOPLOMappingUpdateSchema
 from app.schemas.clo_plo_mapping import DomainCategoryCheckResponse
+from app.services.curriculum_match_check import require_same_curriculum
 from app.services.domain_category_check import check_domain_category_mismatch
 
 router = APIRouter(prefix="/clo-plo-mapping", tags=["CLO-PLO Mapping"])
@@ -125,7 +131,12 @@ def create_clo_plo_mapping(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_clo_ownership(db, payload.clo_id, current_user)
+    clo = _require_clo_ownership(db, payload.clo_id, current_user)
+    # เช็คเฉพาะตอน PLO มีอยู่จริง - ถ้าไม่มีจริงปล่อยให้ IntegrityError ตอน insert ด้านล่างจัดการ (409
+    # เดิม) ไม่ทับซ้อนกับเช็คนี้ ซึ่งมีไว้เทียบ curriculum เท่านั้น
+    plo = db.get(PLO, payload.plo_id)
+    if plo is not None:
+        require_same_curriculum(clo, plo)
     # placeholder ชั่วคราว - _rebalance_clo_weights_evenly ด้านล่างจะเขียนทับค่าจริงให้ทุกคู่ (รวมแถวนี้)
     # ก่อน commit อยู่แล้ว ต้องใส่ค่าเริ่มต้นเพราะคอลัมน์ NOT NULL
     mapping = CLOPLOMapping(**payload.model_dump(), weight_percent=Decimal("100.00"))
