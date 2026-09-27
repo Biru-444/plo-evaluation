@@ -1,10 +1,13 @@
 """
-ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course_plo — ตารางที่สำคัญที่สุดใน
-         การคำนวณ PLO/YLO ทั้งระบบ (ดูคอมเมนต์ที่ app/models/course_plo.py)
+ทำอะไร : CRUD มาตรฐาน (list/get/create/update/delete) สำหรับตาราง course_plo — ข้อมูล "แผนหลักสูตรตอน
+         ออกแบบ" (มคอ.2) เท่านั้น (ดูคอมเมนต์ที่ app/models/course_plo.py)
 
-เชื่อมกับ : responsibility_level ที่แก้ที่นี่ ('primary' <-> 'secondary') มีผลโดยตรงต่อ
-            _build_plo_requirements ใน plo_calculation.py — เปลี่ยนวิชานี้จาก secondary เป็น primary
-            (หรือกลับกัน) จะทำให้ % บรรลุ PLO ของนักศึกษาทุกคนเปลี่ยนทันทีที่ query ครั้งถัดไป
+เชื่อมกับ : **อัปเดต (2026-09) - คอมเมนต์เดิมด้านนี้ล้าสมัยแล้ว**: เดิมเคยบอกว่า responsibility_level ที่
+            แก้ที่นี่มีผลโดยตรงต่อ _build_plo_requirements ทำให้ % บรรลุ PLO เปลี่ยนทันที - ไม่จริงอีกต่อไป
+            การคำนวณเปลี่ยนไปใช้ clo_plo_mapping (ระดับ CLO) แล้วทั้งหมด (ดู
+            app/services/plo_achievement_service.py) แก้ค่าที่นี่จึงไม่กระทบ % บรรลุ PLO ของใครเลย
+            เหลือแค่ใช้แสดงผลใน GET /plo/{plo_id}/course-plan และ Excel export ของภาพรวม PLO (ดู
+            app/services/plo_report_data_service.py)
 
 ถ้าแก้ : เฉพาะ admin เท่านั้นที่แก้ได้ (การตัดสินใจระดับหลักสูตร/มคอ.2 ไม่ใช่สิ่งที่อาจารย์ผู้สอนควร
          แก้เองได้) — list/get เปิดให้ทุก role ดูได้
