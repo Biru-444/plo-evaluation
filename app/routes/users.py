@@ -8,6 +8,9 @@
 
 ถ้าแก้ : ลบผู้ใช้ที่ยังเป็นผู้สอนอยู่ใน course_offering หรือยังเป็นผู้สร้าง CLO ไม่ได้ (409 - ป้องกันด้วย
          ondelete="RESTRICT" ที่ระดับฐานข้อมูล) ต้องย้ายงานสอน/ความเป็นเจ้าของก่อนถึงจะลบได้
+
+         กันระบบไม่มีแอดมินเหลือ (400): แอดมินลบบัญชีตัวเองหรือลดสิทธิ์ตัวเองไม่ได้ - ถ้าไม่มีแอดมินเหลือ
+         ต้องสร้างใหม่ด้วย create_admin.py บนเซิร์ฟเวอร์
 """
 from __future__ import annotations
 
@@ -22,6 +25,13 @@ from app.schemas import UserCreateSchema, UserSchema, UserUpdateSchema
 
 router = APIRouter(prefix="/users", tags=["Users"])
 VALID_ROLES = {"admin", "instructor"}
+
+
+def _ensure_not_self(target: User, current_user: User, action: str) -> None:
+    """กันแอดมินลบ/ลดสิทธิ์ตัวเอง (action = "ลบ"/"ลดสิทธิ์") - พอแล้วที่จะรับประกันว่าเหลือแอดมินอย่างน้อย
+    1 คนเสมอ เพราะคนที่ลบ/ลดสิทธิ์แอดมินได้ต้องเป็นแอดมินอีกคนที่ยังอยู่"""
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail=f"{action}บัญชีของตัวเองไม่ได้ - ให้แอดมินคนอื่นทำแทน")
 
 
 # คืนรายชื่อผู้ใช้ทั้งหมดในระบบ (admin เท่านั้น)
@@ -71,7 +81,7 @@ def update_user(
     user_id: int,
     payload: UserUpdateSchema,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     user = db.get(User, user_id)
     if user is None:
@@ -79,6 +89,8 @@ def update_user(
     data = payload.model_dump(exclude_unset=True)
     if "role" in data and data["role"] not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"role ต้องเป็นหนึ่งใน {VALID_ROLES}")
+    if user.role == "admin" and data.get("role", "admin") != "admin":
+        _ensure_not_self(user, current_user, "ลดสิทธิ์")
     if "password" in data and data["password"]:
         data["password"] = hash_password(data["password"])
     for field, value in data.items():
@@ -92,12 +104,15 @@ def update_user(
     return user
 
 
-# ลบผู้ใช้ (admin เท่านั้น) — 409 ถ้ายังถูกอ้างอิงอยู่ (เป็นผู้สอน/ผู้สร้าง CLO)
+# ลบผู้ใช้ (admin เท่านั้น) — 400 ถ้าลบตัวเอง, 409 ถ้ายังถูกอ้างอิงอยู่ (เป็นผู้สอน/ผู้สร้าง CLO)
 @router.delete("/{user_id}", status_code=204)
-def delete_user(user_id: int, db: Session = Depends(get_db), _=Depends(require_role("admin"))):
+def delete_user(
+    user_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role("admin"))
+):
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    _ensure_not_self(user, current_user, "ลบ")
     try:
         db.delete(user)
         db.commit()

@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.clo import CLODomain
+
 
 class AssessmentItemSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -14,6 +16,7 @@ class AssessmentItemSchema(BaseModel):
     offering_id: int
     name: str
     type: str
+    domain: CLODomain | None = None
     total_score: Decimal
 
 
@@ -23,6 +26,9 @@ class AssessmentCreateSchema(BaseModel):
     offering_id: int
     name: str
     type: str
+    # ด้านการเรียนรู้ (ค่าชุดเดียวกับ CLO) - optional ที่ API ให้ผู้เรียกเดิม (seed/import) ไม่พัง ฟอร์มหน้าเว็บ
+    # บังคับเลือกเอง
+    domain: CLODomain | None = None
     # จำนวนเต็มเท่านั้น (ไม่มีทศนิยม) - ต้องมากกว่า 0
     total_score: int = Field(gt=0)
 
@@ -32,6 +38,7 @@ class AssessmentItemUpdateSchema(BaseModel):
 
     name: str | None = None
     type: str | None = None
+    domain: CLODomain | None = None
     total_score: int | None = Field(default=None, gt=0)
 
 

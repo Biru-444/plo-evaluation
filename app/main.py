@@ -31,6 +31,7 @@ from app.routes import (
     curriculum,
     curriculum_import,
     enrollment,
+    export,
     item_clo,
     plo,
     plo_calculation,
@@ -175,6 +176,7 @@ app.include_router(clo_plo_mapping.router)
 app.include_router(assessment.router)
 app.include_router(item_clo.router)
 app.include_router(roster_import.router)
+app.include_router(export.router)
 
 
 # ให้รันไฟล์นี้ตรง ๆ ได้ตอน dev local (python app/main.py) โดยไม่ต้องพิมพ์คำสั่ง uvicorn เอง —
