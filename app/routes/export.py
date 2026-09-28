@@ -5,26 +5,30 @@
                 PLO ที่วิชานี้รับผิดชอบ
              2. "ผล CLO นักศึกษา" — รายชื่อนักศึกษาที่ลงทะเบียนวิชานี้ + ผ่าน/ไม่ผ่านรายข้อ CLO
                 (ไม่มีคะแนนชิ้นงาน ตามที่ผู้ใช้ขอ) 1 แถวต่อ 1 การลงทะเบียน (ลงเรียนซ้ำ = แยกแถวตามครั้ง)
-         - GET /export/student/{student_id} : ไฟล์รายบุคคลของนักศึกษา 1 คน มี 2 ชีท
+         - GET /export/student/{student_id} : ไฟล์รายบุคคลของนักศึกษา 1 คน มี 3 ชีท
              1. "ข้อมูลนักศึกษา" — ชื่อ, รหัส, รุ่น, หลักสูตร + ผลการบรรลุ PLO ทุกข้อ
-             2. "รายวิชาที่เรียน" — ทุกวิชาที่ลงทะเบียน พร้อมจำนวน CLO ที่ผ่านในแต่ละวิชา
+             2. "รายวิชาตามชั้นปี" — ชั้นปี 1-4 ตามแผนการเรียน (ผล YLO + วิชาของปีนั้น ผ่าน/ไม่ผ่าน/
+                ยังไม่ลงทะเบียน) + วิชาที่ลงทะเบียนนอกแผน
+             3. "ผล CLO รายวิชา" — 1 แถวต่อ CLO ของทุกวิชาที่ลงทะเบียน (คะแนน CLO %, เกณฑ์, ผล)
 
 เชื่อมกับ : - ผล CLO ใช้ compute_offering_clo_achievement_raw() (clo_achievement_service.py) ตัวเดียวกับ
               GET /clo-achievement และ export รายงาน CLO — คำนวณต่อกลุ่มเรียน (offering)
             - ผล PLO ใช้ _build_plo_requirements + _calculate_plo_achievement_for_student
               (plo_achievement_service.py) ตัวเดียวกับ GET /plo/achievement ที่หน้า /student-plo ใช้
+            - ชั้นปี/YLO/แผนการเรียนของชีทรายบุคคลเรียก get_student_ylo_achievement (GET
+              /ylo/achievement/student) ตัวเดียวกับแผง "รายวิชา และ YLO ตามชั้นปี" ในหน้า /student-plo
             - ปุ่มดาวน์โหลดอยู่ที่หน้า /curriculum (CurriculumCourses.jsx) และ /student-plo
               (PLOAchievement.jsx)
 
-ถ้าแก้ : นโยบายสิทธิ์ (เดียวกับ commit "Document and enforce authorization policy for score-returning
-         endpoints") — ผล CLO รายนักศึกษาเป็นข้อมูลระดับรายวิชา: admin เห็นทุกกลุ่มเรียน อาจารย์เห็นเฉพาะ
-         กลุ่มเรียนที่ตัวเองสอน (กรองแถว ไม่ใช่ 403 เพราะ 1 ไฟล์ครอบหลายกลุ่มเรียน) ส่วนผลบรรลุ PLO เป็น
-         ข้อมูลระดับหลักสูตร เปิดให้ admin และอาจารย์ทุกคนโดยตั้งใจ
+ถ้าแก้ : สิทธิ์ — admin และอาจารย์ทุกคนเห็นผล CLO/PLO ของนักศึกษาทุกกลุ่มเรียนโดยตั้งใจ (ผู้ใช้ต้องการให้
+         อาจารย์ดูรายละเอียดนักศึกษาได้ครบ ไม่จำกัดเฉพาะกลุ่มเรียนที่ตัวเองสอน) — ต่างจาก GET
+         /clo-achievement ที่ยังจำกัดเฉพาะอาจารย์เจ้าของกลุ่มเรียน
          PLO ของรายวิชามาจาก clo_plo_mapping (แหล่งเดียวกับที่ใช้คำนวณผลบรรลุ PLO) ไม่ใช่ course_plo
 """
 from __future__ import annotations
 
 import io
+from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -47,7 +51,8 @@ from app.models import (
     Student,
     User,
 )
-from app.services.clo_achievement_service import compute_offering_clo_achievement_raw
+from app.routes.ylo_calculation import get_student_ylo_achievement
+from app.services.clo_achievement_service import StudentCLOResult, compute_offering_clo_achievement_raw
 from app.services.plo_achievement_service import (
     _build_plo_requirements,
     _calculate_plo_achievement_for_student,
@@ -78,6 +83,10 @@ NO_DATA_TEXT = "ไม่มีข้อมูล"
 PLO_ACHIEVED_TEXT = "บรรลุ"
 PLO_NOT_ACHIEVED_TEXT = "ยังไม่บรรลุ"
 PLO_NO_DATA_TEXT = "ยังไม่มีข้อมูล"
+YLO_ACHIEVED_TEXT = "บรรลุ YLO"
+YLO_NOT_ACHIEVED_TEXT = "ยังไม่บรรลุ YLO"
+YEAR_NOT_REACHED_TEXT = "ยังไม่ถึงชั้นปีนี้"
+NOT_ENROLLED_TEXT = "ยังไม่ลงทะเบียน"
 _STATUS_FILL = {
     PASS_TEXT: _PASS_FILL,
     FAIL_TEXT: _FAIL_FILL,
@@ -85,21 +94,47 @@ _STATUS_FILL = {
     PLO_ACHIEVED_TEXT: _PASS_FILL,
     PLO_NOT_ACHIEVED_TEXT: _FAIL_FILL,
     PLO_NO_DATA_TEXT: _NO_DATA_FILL,
+    YLO_ACHIEVED_TEXT: _PASS_FILL,
+    YLO_NOT_ACHIEVED_TEXT: _FAIL_FILL,
+    YEAR_NOT_REACHED_TEXT: _NO_DATA_FILL,
+    NOT_ENROLLED_TEXT: _NO_DATA_FILL,
 }
-OWN_OFFERINGS_NOTE = "* แสดงผล CLO เฉพาะกลุ่มเรียนที่คุณเป็นผู้สอน"
 
 
 def _full_name(first_name: str, last_name: str, title: str | None = None) -> str:
     return f"{title or ''}{first_name} {last_name}".strip()
 
 
-def _term_label(offering: CourseOffering) -> str:
-    return f"{offering.academic_year}/{offering.semester}"
+def _term_label(offering: CourseOffering, multi_section_terms: set[tuple[int, int]] = frozenset()) -> str:
+    """ต่อท้าย "กลุ่ม N" เฉพาะภาคเรียนที่วิชาเปิดหลายกลุ่ม — วิชากลุ่มเดียวไม่แสดงกลุ่ม (ผู้ใช้ไม่ต้องการ Sec)"""
+    label = f"{offering.academic_year}/{offering.semester}"
+    if (offering.academic_year, offering.semester) in multi_section_terms:
+        label += f" กลุ่ม {offering.section}"
+    return label
 
 
-def _can_see_offering_scores(offering: CourseOffering, current_user: User) -> bool:
-    """ผล CLO รายนักศึกษาเป็นข้อมูลระดับรายวิชา — admin หรืออาจารย์ผู้สอนกลุ่มเรียนนั้นเท่านั้น"""
-    return current_user.role == "admin" or offering.instructor_id == current_user.id
+def _clo_summary(passed_values: list[bool | None]) -> str:
+    """สรุป "ผ่าน CLO" — แยก "ไม่มีข้อมูล" (passed=None) ออกจาก "ไม่ผ่าน" ไม่ให้ 0/N อ่านเหมือนสอบตก"""
+    if not passed_values:
+        return "-"
+    no_data = sum(1 for p in passed_values if p is None)
+    if no_data == len(passed_values):
+        return NO_DATA_TEXT
+    summary = f"{sum(1 for p in passed_values if p is True)}/{len(passed_values)}"
+    if no_data:
+        summary += f" ({NO_DATA_TEXT} {no_data})"
+    return summary
+
+
+def _course_status(passed_values: list[bool | None]) -> str:
+    """ผลรายวิชา: ผ่านเมื่อผ่านทุก CLO, ไม่ผ่านเมื่อมี CLO ที่ไม่ผ่าน, นอกนั้น (ยังขาดคะแนน) = ไม่มีข้อมูล"""
+    if not passed_values:
+        return "-"
+    if any(p is False for p in passed_values):
+        return FAIL_TEXT
+    if all(p is True for p in passed_values):
+        return PASS_TEXT
+    return NO_DATA_TEXT
 
 
 def _write_key_values(ws: Worksheet, start_row: int, rows: list[tuple[str, object]]) -> int:
@@ -174,8 +209,8 @@ def export_course_excel(
     เชื่อมกับ : ชีทที่ 2 คำนวณผล CLO ทีละกลุ่มเรียนด้วย compute_offering_clo_achievement_raw() (ตัวเดียว
                 กับ GET /clo-achievement) — "ไม่มีข้อมูล" = ยังไม่มีคะแนนของ CLO นั้นเลย แยกจาก "ไม่ผ่าน"
 
-    ถ้าแก้ : อาจารย์เห็นผล CLO เฉพาะนักศึกษาในกลุ่มเรียนที่ตัวเองสอน (ดูนโยบายสิทธิ์ใน docstring ของไฟล์)
-             ชีทที่ 1 (ข้อมูลรายวิชา) ไม่มีข้อมูลคะแนน จึงแสดงครบทุกกลุ่มเรียน — 404 ถ้าไม่พบรายวิชา
+    ถ้าแก้ : แสดงผล CLO ครบทุกกลุ่มเรียนสำหรับทั้ง admin และอาจารย์ (ดูสิทธิ์ใน docstring ของไฟล์)
+             — 404 ถ้าไม่พบรายวิชา
     """
     course = db.get(Course, course_id)
     if course is None:
@@ -194,6 +229,11 @@ def export_course_excel(
         if instructor_ids
         else {}
     )
+    offerings_per_term = Counter((o.academic_year, o.semester) for o in offerings)
+    multi_section_terms = {term for term, count in offerings_per_term.items() if count > 1}
+
+    def term_label(offering: CourseOffering) -> str:
+        return _term_label(offering, multi_section_terms)
 
     def instructor_name(offering: CourseOffering) -> str:
         instructor = instructor_by_id.get(offering.instructor_id)
@@ -251,7 +291,7 @@ def export_course_excel(
         row + 1,
         ["ปีการศึกษา/ภาคเรียน", "อาจารย์ผู้สอน", "จำนวนนักศึกษา"],
         [
-            [_term_label(o), instructor_name(o), enrolled_count_by_offering.get(o.id, 0)]
+            [term_label(o), instructor_name(o), enrolled_count_by_offering.get(o.id, 0)]
             for o in offerings
         ],
     )
@@ -294,27 +334,20 @@ def export_course_excel(
     # --- ชีท 2: ผล CLO นักศึกษา (1 แถวต่อ 1 การลงทะเบียน) ---
     ws2 = workbook.create_sheet("ผล CLO นักศึกษา")
     ws2.cell(row=1, column=1, value=f"ผลการผ่าน CLO — {course.course_code} {course.name_th}").font = _TITLE_FONT
-    visible_offerings = [o for o in offerings if _can_see_offering_scores(o, current_user)]
-    if len(visible_offerings) < len(offerings):
-        ws2.cell(row=2, column=1, value=OWN_OFFERINGS_NOTE).font = _NOTE_FONT
 
     headers = ["ลำดับ", "รหัสนักศึกษา", "ชื่อ-นามสกุล", "รุ่น", "ภาคเรียนที่เรียน"]
     first_clo_col = len(headers)
     headers += [clo.code for clo in clos] + ["ผ่าน CLO"]
 
-    enrollment_rows: list[tuple[Student, CourseOffering, list[str]]] = []
-    for offering in visible_offerings:
+    enrollment_rows: list[tuple[Student, CourseOffering, list[bool | None]]] = []
+    for offering in offerings:
         results = compute_offering_clo_achievement_raw(db, offering)
-        status_by_student_clo: dict[tuple[str, int], str] = {}
+        passed_by_student_clo: dict[tuple[str, int], bool | None] = {}
         roster: dict[str, Student] = {}
         for result in results:
             for student_result in result.student_results:
                 roster[student_result.student.id] = student_result.student
-                if student_result.passed is None:
-                    status = NO_DATA_TEXT
-                else:
-                    status = PASS_TEXT if student_result.passed else FAIL_TEXT
-                status_by_student_clo[(student_result.student.id, result.clo.id)] = status
+                passed_by_student_clo[(student_result.student.id, result.clo.id)] = student_result.passed
         if not results:
             # วิชายังไม่มี CLO — ยังต้องแสดงรายชื่อนักศึกษาที่ลงทะเบียนอยู่
             for student in (
@@ -324,9 +357,14 @@ def export_course_excel(
             ):
                 roster[student.id] = student
         for student in roster.values():
-            statuses = [status_by_student_clo.get((student.id, clo.id), NO_DATA_TEXT) for clo in clos]
-            enrollment_rows.append((student, offering, statuses))
+            passed_values = [passed_by_student_clo.get((student.id, clo.id)) for clo in clos]
+            enrollment_rows.append((student, offering, passed_values))
     enrollment_rows.sort(key=lambda r: (r[0].id, r[1].academic_year, r[1].semester, r[1].section))
+
+    def status_text(passed: bool | None) -> str:
+        if passed is None:
+            return NO_DATA_TEXT
+        return PASS_TEXT if passed else FAIL_TEXT
 
     table_rows = [
         [
@@ -334,11 +372,11 @@ def export_course_excel(
             student.id,
             _full_name(student.first_name, student.last_name, student.title),
             student.cohort_year,
-            _term_label(offering),
-            *statuses,
-            f"{statuses.count(PASS_TEXT)}/{len(clos)}",
+            term_label(offering),
+            *(status_text(p) for p in passed_values),
+            _clo_summary(passed_values),
         ]
-        for index, (student, offering, statuses) in enumerate(enrollment_rows, start=1)
+        for index, (student, offering, passed_values) in enumerate(enrollment_rows, start=1)
     ]
     header_row = 4
     _write_table(
@@ -361,15 +399,14 @@ def export_student_excel(
     current_user: User = Depends(require_role("admin", "instructor")),
 ):
     """
-    ทำอะไร : สร้างไฟล์ Excel รายบุคคลของนักศึกษา 1 คน (2 ชีท — ดู docstring ของไฟล์)
+    ทำอะไร : สร้างไฟล์ Excel รายบุคคลของนักศึกษา 1 คน (3 ชีท — ดู docstring ของไฟล์)
 
     เชื่อมกับ : ผลบรรลุ PLO มาจาก _calculate_plo_achievement_for_student ตัวเดียวกับ GET
                 /plo/achievement ที่หน้า /student-plo ใช้ (ค่า % ต่อเนื่อง + has_data) — "ผ่าน CLO" ต่อ
                 วิชาคำนวณต่อกลุ่มเรียนด้วย compute_offering_clo_achievement_raw()
 
-    ถ้าแก้ : ผลบรรลุ PLO เปิดให้ admin และอาจารย์ทุกคน (ข้อมูลระดับหลักสูตร) แต่คอลัมน์ "ผ่าน CLO" เป็น
-             ข้อมูลระดับรายวิชา อาจารย์เห็นเฉพาะกลุ่มเรียนที่ตัวเองสอน (อื่นๆ แสดง "-") — 404 ถ้าไม่พบ
-             นักศึกษา
+    ถ้าแก้ : admin และอาจารย์ทุกคนเห็นผล PLO และผล CLO ทุกวิชาของนักศึกษา (ดูสิทธิ์ใน docstring ของไฟล์)
+             — 404 ถ้าไม่พบนักศึกษา
     """
     student = db.get(Student, student_id)
     if student is None:
@@ -447,50 +484,122 @@ def export_student_excel(
     )
     _set_column_widths(ws, [18, 60, 18, 14, 16])
 
-    # --- ชีท 2: รายวิชาที่เรียน ---
-    ws2 = workbook.create_sheet("รายวิชาที่เรียน")
-    ws2.cell(
-        row=1,
-        column=1,
-        value=f"รายวิชาที่เรียน — {student.id} {_full_name(student.first_name, student.last_name, student.title)}",
-    ).font = _TITLE_FONT
+    student_label = f"{student.id} {_full_name(student.first_name, student.last_name, student.title)}"
 
-    course_rows = []
-    hidden_any = False
-    for index, (offering, course) in enumerate(enrollment_rows, start=1):
-        if _can_see_offering_scores(offering, current_user):
-            results = compute_offering_clo_achievement_raw(db, offering)
-            passed = sum(
-                1
-                for result in results
-                for student_result in result.student_results
-                if student_result.student.id == student.id and student_result.passed
-            )
-            clo_summary = f"{passed}/{len(results)}"
-        else:
-            hidden_any = True
-            clo_summary = "-"
+    # ผล CLO ของนักศึกษาคนนี้ต่อการลงทะเบียน 1 ครั้ง
+    clo_results_by_offering: dict[int, list[tuple[CLO, StudentCLOResult]]] = {
+        offering.id: [
+            (result.clo, student_result)
+            for result in compute_offering_clo_achievement_raw(db, offering)
+            for student_result in result.student_results
+            if student_result.student.id == student.id
+        ]
+        for offering, _course in enrollment_rows
+    }
+
+    offerings_by_course: dict[int, list[CourseOffering]] = {}
+    for offering, course in enrollment_rows:
+        offerings_by_course.setdefault(course.id, []).append(offering)
+
+    def enrolled_course_rows(offering: CourseOffering, course: Course) -> list[object]:
         instructor = instructor_by_id.get(offering.instructor_id)
-        course_rows.append(
-            [
-                index,
-                _term_label(offering),
-                course.course_code,
-                course.name_th,
-                course.credit,
-                _full_name(instructor.first_name, instructor.last_name) if instructor else "-",
-                clo_summary,
-            ]
+        passed_values = [student_result.passed for _clo, student_result in clo_results_by_offering[offering.id]]
+        return [
+            course.course_code,
+            course.name_th,
+            course.credit,
+            _term_label(offering),
+            _full_name(instructor.first_name, instructor.last_name) if instructor else "-",
+            _course_status(passed_values),
+            _clo_summary(passed_values),
+        ]
+
+    course_headers = ["รหัสวิชา", "ชื่อวิชา", "หน่วยกิต", "ภาคเรียนที่เรียน", "อาจารย์ผู้สอน", "ผลรายวิชา", "ผ่าน CLO"]
+    course_status_column = {5}
+
+    # --- ชีท 2: รายวิชาตามชั้นปี (โครงเดียวกับแผง "รายวิชา และ YLO ตามชั้นปี" ในหน้า /student-plo) ---
+    ws2 = workbook.create_sheet("รายวิชาตามชั้นปี")
+    ws2.cell(row=1, column=1, value=f"รายวิชาตามชั้นปี — {student_label}").font = _TITLE_FONT
+
+    ylo_achievement = get_student_ylo_achievement(student_id=student.id, db=db, current_user=current_user)
+    course_by_id = {
+        c.id: c
+        for c in db.query(Course).filter(
+            Course.id.in_({item.course_id for year in ylo_achievement.years for item in year.courses})
         )
-    if hidden_any:
-        ws2.cell(row=2, column=1, value=OWN_OFFERINGS_NOTE).font = _NOTE_FONT
+    }
+    planned_course_ids: set[int] = set()
+    row = 4
+    for year in ylo_achievement.years:
+        if not year.is_reached:
+            ylo_status = YEAR_NOT_REACHED_TEXT
+        elif not year.has_data:
+            ylo_status = PLO_NO_DATA_TEXT
+        else:
+            ylo_status = YLO_ACHIEVED_TEXT if year.is_achieved else YLO_NOT_ACHIEVED_TEXT
+        ws2.cell(row=row, column=1, value=f"ชั้นปีที่ {year.year_level}").font = _SECTION_FONT
+        status_cell = ws2.cell(row=row, column=2, value=ylo_status)
+        status_cell.fill = _STATUS_FILL.get(ylo_status, _NO_DATA_FILL)
+        row += 1
+        if year.ylo_description:
+            row = _write_key_values(ws2, row, [("YLO", year.ylo_description)])
+
+        year_rows = []
+        for item in year.courses:
+            planned_course_ids.add(item.course_id)
+            course = course_by_id[item.course_id]
+            offerings = offerings_by_course.get(item.course_id)
+            if offerings:
+                year_rows.extend(enrolled_course_rows(o, course) for o in offerings)
+            else:
+                year_rows.append([course.course_code, course.name_th, course.credit, "-", "-", NOT_ENROLLED_TEXT, "-"])
+        if year_rows:
+            row = _write_table(ws2, row, course_headers, year_rows, status_columns=course_status_column)
+        else:
+            ws2.cell(row=row, column=1, value="ยังไม่มีแผนการเรียนสำหรับชั้นปีนี้").font = _NOTE_FONT
+            row += 1
+        row += 1
+
+    unplanned_rows = [
+        enrolled_course_rows(offering, course)
+        for offering, course in enrollment_rows
+        if course.id not in planned_course_ids
+    ]
+    if unplanned_rows:
+        ws2.cell(row=row, column=1, value="วิชาที่ลงทะเบียนนอกแผนการเรียน").font = _SECTION_FONT
+        _write_table(ws2, row + 1, course_headers, unplanned_rows, status_columns=course_status_column)
+    _set_column_widths(ws2, [16, 44, 9, 16, 26, 16, 20])
+
+    # --- ชีท 3: ผล CLO รายข้อของแต่ละวิชาที่ลงทะเบียน ---
+    ws3 = workbook.create_sheet("ผล CLO รายวิชา")
+    ws3.cell(row=1, column=1, value=f"ผล CLO รายวิชา — {student_label}").font = _TITLE_FONT
+    clo_rows = []
+    for offering, course in enrollment_rows:
+        for clo, student_result in clo_results_by_offering[offering.id]:
+            if student_result.passed is None:
+                status = NO_DATA_TEXT
+            else:
+                status = PASS_TEXT if student_result.passed else FAIL_TEXT
+            clo_rows.append(
+                [
+                    _term_label(offering),
+                    course.course_code,
+                    course.name_th,
+                    clo.code,
+                    clo.description,
+                    float(student_result.clo_percent) if student_result.clo_percent is not None else "-",
+                    float(clo.pass_threshold_percent),
+                    status,
+                ]
+            )
     _write_table(
-        ws2,
+        ws3,
         4,
-        ["ลำดับ", "ปีการศึกษา/ภาคเรียน", "รหัสวิชา", "ชื่อวิชา", "หน่วยกิต", "อาจารย์ผู้สอน", "ผ่าน CLO"],
-        course_rows,
+        ["ภาคเรียนที่เรียน", "รหัสวิชา", "ชื่อวิชา", "รหัส CLO", "คำอธิบาย CLO", "คะแนน CLO (%)", "เกณฑ์ผ่าน (%)", "ผล"],
+        clo_rows,
+        status_columns={7},
     )
-    ws2.freeze_panes = "A5"
-    _set_column_widths(ws2, [7, 18, 14, 40, 9, 28, 11])
+    ws3.freeze_panes = "A5"
+    _set_column_widths(ws3, [16, 14, 36, 10, 50, 13, 12, 12])
 
     return _xlsx_response(workbook, f"student_{student.id}.xlsx")

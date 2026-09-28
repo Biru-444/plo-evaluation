@@ -1,8 +1,8 @@
 """
 Tests สำหรับ GET /export/course/{course_id} และ GET /export/student/{student_id} (app/routes/export.py)
 — เปิดไฟล์ .xlsx ที่ได้กลับมาด้วย openpyxl แล้วตรวจชื่อชีท + ค่าในเซลล์จริง ว่าผ่าน/ไม่ผ่าน CLO และ
-ผลบรรลุ PLO ตรงกับกฎเดียวกับหน้าเว็บ (เกณฑ์ผ่าน CLO 60%, เกณฑ์บรรลุ PLO 60%) และเคารพนโยบายสิทธิ์:
-อาจารย์เห็นผล CLO เฉพาะกลุ่มเรียนที่ตัวเองสอน
+ผลบรรลุ PLO ตรงกับกฎเดียวกับหน้าเว็บ (เกณฑ์ผ่าน CLO 60%, เกณฑ์บรรลุ PLO 60%) และอาจารย์ทุกคนเห็นผล CLO
+ครบทุกกลุ่มเรียน (ไม่จำกัดเฉพาะกลุ่มที่ตัวเองสอน)
 
 ทุกเทสสร้างข้อมูลของตัวเองใน db_session (rollback อัตโนมัติหลังจบเทสตาม conftest.py)
 """
@@ -29,7 +29,9 @@ from app.models import (
     PLO,
     Student,
     StudentScore,
+    StudyPlan,
     User,
+    YLO,
 )
 
 
@@ -154,7 +156,8 @@ def test_course_export_has_course_info_and_clo_results(client, db_session, admin
     row1 = _find_row_containing(results, "EXP001")
     row2 = _find_row_containing(results, "EXP002")
     assert (row1[clo_a], row1[clo_b], row1[summary]) == ("ผ่าน", "ผ่าน", "2/2")
-    assert (row2[clo_a], row2[clo_b], row2[summary]) == ("ไม่ผ่าน", "ไม่มีข้อมูล", "0/2")
+    # CLO ที่ยังไม่มีคะแนนแยกนับ ไม่ถูกนับรวมเป็น "ไม่ผ่าน"
+    assert (row2[clo_a], row2[clo_b], row2[summary]) == ("ไม่ผ่าน", "ไม่มีข้อมูล", "0/2 (ไม่มีข้อมูล 1)")
     assert row1[header.index("ภาคเรียนที่เรียน")] == "2569/1"
     # ไม่มีคะแนนชิ้นงานในไฟล์ (ผู้ใช้ขอแค่ผล ผ่าน/ไม่ผ่าน)
     assert "item-CLO-A" not in _all_cells(results)
@@ -179,6 +182,59 @@ def test_course_export_retake_is_one_row_per_enrollment(client, db_session, admi
     assert exp002_rows[1][5:7] == ["ไม่มีข้อมูล", "ไม่มีข้อมูล"]
 
 
+def test_course_export_labels_group_only_when_term_has_multiple_sections(client, db_session, admin_user):
+    """วิชาเปิด 2 กลุ่มในภาคเดียวกัน -> ต่อท้าย "กลุ่ม N" ให้แยกออก ส่วนภาคที่มีกลุ่มเดียวไม่แสดงกลุ่ม"""
+    fx = _make_fixtures(db_session, admin_user.id)
+    db_session.add_all(
+        [
+            CourseOffering(
+                course_id=fx["course"].id, instructor_id=fx["owner"].id, academic_year=2569, semester=1, section="2"
+            ),
+            CourseOffering(
+                course_id=fx["course"].id, instructor_id=fx["owner"].id, academic_year=2570, semester=1, section="1"
+            ),
+        ]
+    )
+    db_session.commit()
+
+    wb = load_workbook(io.BytesIO(client.get(f"/export/course/{fx['course'].id}").content))
+    info_cells = _all_cells(_sheet_values(wb["ข้อมูลรายวิชา"]))
+    assert {"2569/1 กลุ่ม 1", "2569/1 กลุ่ม 2", "2570/1"} <= set(info_cells)
+    assert "2570/1 กลุ่ม 1" not in info_cells
+    results = _sheet_values(wb["ผล CLO นักศึกษา"])
+    assert _find_row_containing(results, "EXP001")[4] == "2569/1 กลุ่ม 1"
+
+
+def test_clo_summary_for_course_without_clos_or_scores(client, db_session, admin_user):
+    """วิชาที่ยังไม่มี CLO -> "-" (ไม่ใช่ 0/0) และวิชาที่ยังไม่มีคะแนนเลย -> "ไม่มีข้อมูล" (ไม่ใช่ 0/N)"""
+    fx = _make_fixtures(db_session, admin_user.id)
+    no_clo_course = Course(curriculum_id=fx["course"].curriculum_id, course_code="EXP102", name_th="ยังไม่มี CLO", credit=3)
+    db_session.add(no_clo_course)
+    db_session.flush()
+    no_clo_offering = CourseOffering(
+        course_id=no_clo_course.id, instructor_id=fx["owner"].id, academic_year=2569, semester=1, section="1"
+    )
+    no_score_offering = CourseOffering(
+        course_id=fx["course"].id, instructor_id=fx["owner"].id, academic_year=2570, semester=1, section="1"
+    )
+    db_session.add_all([no_clo_offering, no_score_offering])
+    db_session.flush()
+    db_session.add_all(
+        [
+            Enrollment(student_id="EXP001", offering_id=no_clo_offering.id),
+            Enrollment(student_id="EXP001", offering_id=no_score_offering.id),
+        ]
+    )
+    db_session.commit()
+
+    courses = _sheet_values(load_workbook(io.BytesIO(client.get("/export/student/EXP001").content))["รายวิชาตามชั้นปี"])
+    assert _find_row_containing(courses, "EXP102")[5:7] == ["-", "-"]
+    assert _find_row_containing(courses, "2570/1")[5:7] == ["ไม่มีข้อมูล", "ไม่มีข้อมูล"]
+
+    course_wb = load_workbook(io.BytesIO(client.get(f"/export/course/{no_clo_course.id}").content))
+    assert _find_row_containing(_sheet_values(course_wb["ผล CLO นักศึกษา"]), "EXP001")[-1] == "-"
+
+
 def test_course_export_owner_instructor_sees_clo_results(make_client, db_session, admin_user):
     fx = _make_fixtures(db_session, admin_user.id)
     resp = make_client(fx["owner"]).get(f"/export/course/{fx['course'].id}")
@@ -187,18 +243,15 @@ def test_course_export_owner_instructor_sees_clo_results(make_client, db_session
     assert "EXP001" in _all_cells(results)
 
 
-def test_course_export_non_owner_instructor_sees_no_student_results(make_client, db_session, admin_user):
-    """อาจารย์ที่ไม่ได้สอนกลุ่มเรียนไหนของวิชานี้ ได้ไฟล์ (ข้อมูลรายวิชาไม่ใช่ข้อมูลคะแนน) แต่ไม่เห็นผล
-    CLO ของนักศึกษาคนไหนเลย - นโยบายเดียวกับ GET /clo-achievement"""
+def test_course_export_non_owner_instructor_sees_all_student_results(make_client, db_session, admin_user):
+    """อาจารย์ที่ไม่ได้สอนวิชานี้ก็เห็นผล CLO ของนักศึกษาทุกกลุ่มเรียน (ผู้ใช้ต้องการให้ดูรายละเอียดได้ครบ)"""
     fx = _make_fixtures(db_session, admin_user.id)
     resp = make_client(fx["other"]).get(f"/export/course/{fx['course'].id}")
     assert resp.status_code == 200
-    wb = load_workbook(io.BytesIO(resp.content))
-    info = _sheet_values(wb["ข้อมูลรายวิชา"])
-    assert _find_row(info, "รหัสวิชา")[1] == "EXP101"
-    results = _all_cells(_sheet_values(wb["ผล CLO นักศึกษา"]))
-    assert "EXP001" not in results and "EXP002" not in results
-    assert "* แสดงผล CLO เฉพาะกลุ่มเรียนที่คุณเป็นผู้สอน" in results
+    results = _sheet_values(load_workbook(io.BytesIO(resp.content))["ผล CLO นักศึกษา"])
+    header = _find_row_containing(results, "รหัสนักศึกษา")
+    assert _find_row_containing(results, "EXP001")[header.index("ผ่าน CLO")] == "2/2"
+    assert "EXP002" in _all_cells(results)
 
 
 def test_student_export_has_profile_plo_and_courses(client, db_session, admin_user):
@@ -209,7 +262,7 @@ def test_student_export_has_profile_plo_and_courses(client, db_session, admin_us
     assert 'filename="student_EXP001.xlsx"' in resp.headers["content-disposition"]
 
     wb = load_workbook(io.BytesIO(resp.content))
-    assert wb.sheetnames == ["ข้อมูลนักศึกษา", "รายวิชาที่เรียน"]
+    assert wb.sheetnames == ["ข้อมูลนักศึกษา", "รายวิชาตามชั้นปี", "ผล CLO รายวิชา"]
 
     info = _sheet_values(wb["ข้อมูลนักศึกษา"])
     assert _find_row(info, "รหัสนักศึกษา")[1] == "EXP001"
@@ -222,14 +275,17 @@ def test_student_export_has_profile_plo_and_courses(client, db_session, admin_us
     assert _find_row(info, "PLO2")[4] == "ยังไม่มีข้อมูล"
     assert _find_row(info, "บรรลุ PLO")[1] == "1/2 ข้อ"
 
-    courses = _sheet_values(wb["รายวิชาที่เรียน"])
+    courses = _sheet_values(wb["รายวิชาตามชั้นปี"])
     header = _find_row_containing(courses, "รหัสวิชา")
     assert "Sec" not in header and "เกรด" not in header
+    # ไม่มีแผนการเรียน -> วิชาที่ลงทะเบียนไปอยู่ในส่วน "นอกแผน" ไม่หายไปจากไฟล์
+    assert "วิชาที่ลงทะเบียนนอกแผนการเรียน" in _all_cells(courses)
     course_row = _find_row_containing(courses, "EXP101")
-    assert course_row[3] == "วิชาทดสอบส่งออก"
-    assert course_row[5] == "สมชาย ใจดี"
-    assert course_row[6] == "2/2"
-    assert "A" not in course_row
+    assert course_row == ["EXP101", "วิชาทดสอบส่งออก", 3, "2569/1", "สมชาย ใจดี", "ผ่าน", "2/2"]
+
+    clo_rows = _sheet_values(wb["ผล CLO รายวิชา"])
+    clo_a = _find_row_containing(clo_rows, "CLO-A")
+    assert clo_a == ["2569/1", "EXP101", "วิชาทดสอบส่งออก", "CLO-A", "คำอธิบาย CLO-A", 90.0, 60.0, "ผ่าน"]
 
 
 def test_student_export_not_achieved(client, db_session, admin_user):
@@ -238,19 +294,50 @@ def test_student_export_not_achieved(client, db_session, admin_user):
     wb = load_workbook(io.BytesIO(client.get("/export/student/EXP002").content))
     plo1 = _find_row(_sheet_values(wb["ข้อมูลนักศึกษา"]), "PLO1")
     assert (plo1[3], plo1[4]) == (40.0, "ยังไม่บรรลุ")
-    assert _find_row_containing(_sheet_values(wb["รายวิชาที่เรียน"]), "EXP101")[6] == "0/2"
+    course_row = _find_row_containing(_sheet_values(wb["รายวิชาตามชั้นปี"]), "EXP101")
+    assert course_row[5:7] == ["ไม่ผ่าน", "0/2 (ไม่มีข้อมูล 1)"]
+    clo_rows = _sheet_values(wb["ผล CLO รายวิชา"])
+    assert _find_row_containing(clo_rows, "CLO-A")[5:8] == [40.0, 60.0, "ไม่ผ่าน"]
+    assert _find_row_containing(clo_rows, "CLO-B")[5:8] == ["-", 60.0, "ไม่มีข้อมูล"]
 
 
-def test_student_export_non_owner_instructor_sees_plo_but_not_clo(make_client, db_session, admin_user):
-    """ผล PLO (ระดับหลักสูตร) เปิดให้อาจารย์ทุกคน แต่ "ผ่าน CLO" ของวิชาที่ไม่ได้สอนต้องเป็น "-" """
+def test_student_export_groups_courses_by_study_plan_year(client, db_session, admin_user):
+    """วิชาในแผนการเรียนแยกตามชั้นปี พร้อมผล YLO — วิชาในแผนที่ยังไม่ลงทะเบียนแสดง "ยังไม่ลงทะเบียน"
+    และชั้นปีที่นักศึกษายังไปไม่ถึงแสดง "ยังไม่ถึงชั้นปีนี้" (โครงเดียวกับหน้า /student-plo)"""
+    fx = _make_fixtures(db_session, admin_user.id)
+    curriculum_id = fx["course"].curriculum_id
+    later_course = Course(curriculum_id=curriculum_id, course_code="EXP201", name_th="วิชาปีสอง", credit=2)
+    db_session.add(later_course)
+    db_session.flush()
+    db_session.add_all(
+        [
+            StudyPlan(curriculum_id=curriculum_id, course_id=fx["course"].id, year_level=1, semester=1),
+            StudyPlan(curriculum_id=curriculum_id, course_id=later_course.id, year_level=2, semester=1),
+            YLO(curriculum_id=curriculum_id, year_level=1, description="YLO ปีหนึ่ง"),
+        ]
+    )
+    db_session.commit()
+
+    rows = _sheet_values(load_workbook(io.BytesIO(client.get("/export/student/EXP001").content))["รายวิชาตามชั้นปี"])
+    year_rows = [row for row in rows if row[0] and str(row[0]).startswith("ชั้นปีที่")]
+    assert [row[0] for row in year_rows] == ["ชั้นปีที่ 1", "ชั้นปีที่ 2", "ชั้นปีที่ 3", "ชั้นปีที่ 4"]
+    assert _find_row(rows, "YLO")[1] == "YLO ปีหนึ่ง"
+    assert _find_row_containing(rows, "EXP101")[5] == "ผ่าน"
+    assert _find_row_containing(rows, "EXP201")[3:6] == ["-", "-", "ยังไม่ลงทะเบียน"]
+    assert "วิชาที่ลงทะเบียนนอกแผนการเรียน" not in _all_cells(rows)
+    # ชั้นปีของรุ่น 69 ขึ้นกับวันที่รันเทส - เช็คเฉพาะปี 4 ที่ยังไปไม่ถึงแน่นอนอีกหลายปี
+    assert year_rows[3][1] == "ยังไม่ถึงชั้นปีนี้"
+
+
+def test_student_export_non_owner_instructor_sees_plo_and_clo(make_client, db_session, admin_user):
+    """อาจารย์ที่ไม่ได้สอนวิชานี้ก็เห็นทั้งผล PLO และผล CLO ทุกวิชาของนักศึกษา"""
     fx = _make_fixtures(db_session, admin_user.id)
     resp = make_client(fx["other"]).get("/export/student/EXP001")
     assert resp.status_code == 200
     wb = load_workbook(io.BytesIO(resp.content))
     assert _find_row(_sheet_values(wb["ข้อมูลนักศึกษา"]), "PLO1")[4] == "บรรลุ"
-    courses = _sheet_values(wb["รายวิชาที่เรียน"])
-    assert _find_row_containing(courses, "EXP101")[6] == "-"
-    assert "* แสดงผล CLO เฉพาะกลุ่มเรียนที่คุณเป็นผู้สอน" in _all_cells(courses)
+    assert _find_row_containing(_sheet_values(wb["รายวิชาตามชั้นปี"]), "EXP101")[5:7] == ["ผ่าน", "2/2"]
+    assert _find_row_containing(_sheet_values(wb["ผล CLO รายวิชา"]), "CLO-A")[7] == "ผ่าน"
 
 
 def test_export_not_found_returns_404(client, db_session):
