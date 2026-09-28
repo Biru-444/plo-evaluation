@@ -16,6 +16,11 @@
 
 ถ้าแก้ : เกณฑ์ผ่าน (pass_threshold_percent) ที่แก้ผ่าน update_clo กระทบการตัดสิน CLO ผ่าน/ไม่ผ่าน
          ย้อนหลังทั้งหมดทันที (ดู app/models/clo.py)
+
+         delete_clo (2026-09-28) บล็อกด้วย 409 ถ้า CLO ผูกกับ item_clo หรือ clo_plo_mapping อยู่ - ทุก
+         role รวมแอดมินด้วย (เดิม cascade ลบเงียบๆ ไม่เตือน) - ไม่กระทบการลบ Course ทั้งวิชา (ที่ cascade
+         ลบ CLO ไปด้วยผ่าน DB/ORM ตรงๆ ใน app/routes/courses.py ไม่ผ่านฟังก์ชันนี้เลย) หรือสคริปต์
+         seed/reset ที่ลบด้วย raw SQL ตรงๆ (ไม่ผ่าน API เลยเช่นกัน) - ทั้งสองจุดนี้ยังคงพฤติกรรมเดิม
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import CLO, CLOPLOMapping, CourseOffering, PLO, User
+from app.models import CLO, CLOPLOMapping, CourseOffering, ItemCLO, PLO, User
 from app.schemas import CLOCreateSchema, CLOSchema, CLOUpdateSchema
 from app.services.curriculum_match_check import require_same_curriculum
 
@@ -165,7 +170,9 @@ def update_clo(
     return clo
 
 
-# ลบ CLO — instructor ลบได้เฉพาะ CLO ของวิชาที่ตัวเองสอนอยู่ (เช็คสิทธิ์ด้านล่าง)
+# ลบ CLO — instructor ลบได้เฉพาะ CLO ของวิชาที่ตัวเองสอนอยู่ (เช็คสิทธิ์ด้านล่าง) 409 ถ้า CLO นี้ถูกใช้
+# แล้ว (ผูกกับงานประเมิน item_clo หรือผูกกับ PLO clo_plo_mapping) - กฎเดียวกันทุก role รวมแอดมินด้วย
+# (ผู้ใช้ยืนยันแล้ว 2026-09-28 - เดิมลบได้เสมอแล้ว cascade ลบข้อมูลที่เกี่ยวข้องไปเงียบๆ ไม่เตือนเลย)
 @router.delete("/{clo_id}", status_code=204)
 def delete_clo(
     clo_id: int,
@@ -186,5 +193,19 @@ def delete_clo(
         )
         if owns_course is None:
             raise HTTPException(status_code=403, detail="คุณไม่ใช่ผู้สอนวิชานี้")
-    db.delete(clo)  # cascade ลบ item_clo ที่อ้างถึงด้วย
+
+    item_clo_count = db.query(ItemCLO).filter(ItemCLO.clo_id == clo_id).count()
+    plo_mapping_count = db.query(CLOPLOMapping).filter(CLOPLOMapping.clo_id == clo_id).count()
+    if item_clo_count or plo_mapping_count:
+        reasons = []
+        if item_clo_count:
+            reasons.append(f"งานประเมิน {item_clo_count} รายการ")
+        if plo_mapping_count:
+            reasons.append(f"PLO {plo_mapping_count} รายการ")
+        raise HTTPException(
+            status_code=409,
+            detail=f"CLO นี้ผูกกับ {' และ '.join(reasons)} แล้ว ลบไม่ได้ - กรุณาถอดการผูกออกก่อน",
+        )
+
+    db.delete(clo)
     db.commit()
