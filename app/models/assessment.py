@@ -21,6 +21,10 @@ class AssessmentItem(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     # ประเภทชิ้นงาน (เช่น "quiz", "midterm", "assignment") — free text แสดงผลอย่างเดียว
     type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # ด้านการเรียนรู้ที่ชิ้นงานนี้วัด - ค่าชุดเดียวกับ clo.domain ("knowledge"/"skills"/"ethics"/
+    # "character" จำกัดที่ Pydantic) nullable เพราะชิ้นงานเก่าไม่มีค่านี้ (ดู
+    # scripts/migrate_add_assessment_item_domain.py) - แสดงผลอย่างเดียว ไม่ใช้ในสูตรคำนวณใดๆ
+    domain: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # คะแนนเต็มของชิ้นงานนี้ — ใช้เป็นตัวหารแปลงคะแนนดิบเป็น % ในทุกสูตรคำนวณ (ดู plo_calculation.py)
     total_score: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False)
 
